@@ -1,0 +1,29 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+streamlit = "*"
+openai = "*"
+langchain = "*"
+langchain-community = "*"
+langchain-openai = "*"
+pandas = "*"
+webvtt-py = "*"
+numpy = "*"
+altair = "*"
+supabase = "*"
+streamlit-url-fragment = "*"
+supabase_auth = "*"
+streamlit_option_menu = "*"
+statsmodels = "*"
+pyjwt = "*"
+boto3 = "*"
+imageio-ffmpeg = "*"
+streamlit-calendar = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.12"
