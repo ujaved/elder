@@ -111,7 +111,7 @@ def question_list_changed():
             del st.session_state.cur_care_plan["questions"][r]
         st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
             st.session_state.cur_care_plan["id"],
-            tasks=st.session_state.cur_care_plan["questions"],
+            questions=st.session_state.cur_care_plan["questions"],
         )
 
     if st.session_state.question_list_changed["edited_rows"]:
@@ -130,7 +130,7 @@ def question_list_changed():
 
         st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
             st.session_state.cur_care_plan["id"],
-            tasks=st.session_state.cur_care_plan["questions"],
+            questions=st.session_state.cur_care_plan["questions"],
         )
 
     if st.session_state.question_list_changed["added_rows"]:
@@ -149,7 +149,7 @@ def question_list_changed():
             st.session_state.cur_care_plan = (
                 st.session_state.db_client.update_care_plan(
                     st.session_state.cur_care_plan["id"],
-                    tasks=st.session_state.cur_care_plan["questions"],
+                    questions=st.session_state.cur_care_plan["questions"],
                 )
             )
 
@@ -315,6 +315,7 @@ def render_questions(container):
             use_container_width=True,
             num_rows="dynamic",
             key="question_list_changed",
+            on_change=question_list_changed,
         )
     q_col, a_col = container.columns(2)
     for i, q in enumerate(unanswered_questions):
@@ -323,7 +324,7 @@ def render_questions(container):
             "Please record your answer",
             key=f"answer_{i}",
             on_change=audio_answer_cb,
-            args=[answered_questions, unanswered_questions, i],
+            args=[answered_questions, unanswered_questions, i, container],
         )
 
 
@@ -331,12 +332,14 @@ def audio_answer_cb(
     answered_questions: list[dict],
     unanswered_questions: list[dict],
     unanswered_idx: int,
+    container,
 ):
-    with st.spinner("Generating answer transcript"):
-        key = f"answer_{unanswered_idx}"
-        unanswered_questions[unanswered_idx]["answer"] = generate_answer_from_audio(
-            st.session_state[key], unanswered_questions[unanswered_idx]["question"]
-        )
+    with container:
+        with st.spinner("Generating answer transcript"):
+            key = f"answer_{unanswered_idx}"
+            unanswered_questions[unanswered_idx]["answer"] = generate_answer_from_audio(
+                st.session_state[key], unanswered_questions[unanswered_idx]["question"]
+            )
         unanswered_questions[unanswered_idx]["updated_at"] = datetime.now()
     st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
         st.session_state.cur_care_plan["id"],
@@ -557,10 +560,20 @@ def main():
             user_id = payload["sub"]
             care_plan_id = payload["user_metadata"]["care_plan_id"]
             st.session_state["cur_care_plan"] = (
-                st.session_state.db_client.update_care_plan(
-                    care_plan_id, carer_id=user_id, carer_status=Carer_Status.ACCEPTED
-                )
+                st.session_state.db_client.get_care_plan(care_plan_id)
             )
+            if (
+                st.session_state["cur_care_plan"]["carer_id"] != user_id
+                or st.session_state["cur_care_plan"]["carer_status"]
+                != Carer_Status.ACCEPTED
+            ):
+                st.session_state["cur_care_plan"] = (
+                    st.session_state.db_client.update_care_plan(
+                        care_plan_id,
+                        carer_id=user_id,
+                        carer_status=Carer_Status.ACCEPTED,
+                    )
+                )
             st.session_state["user"] = st.session_state.db_client.get_user(
                 jwt=acces_token
             )

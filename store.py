@@ -151,6 +151,8 @@ class DBClient:
         for cp in cps:
             tasks = [Task.deserialize_from_db(task) for task in cp["tasks"]]
             cp["tasks"] = tasks
+            questions = [Task.deserialize_question_from_db(q) for q in cp["questions"]]
+            cp["questions"] = questions
         return cps
 
     def get_care_plan(self, care_plan_id: str) -> dict:
@@ -163,6 +165,8 @@ class DBClient:
         )
         tasks = [Task.deserialize_from_db(task) for task in cp["tasks"]]
         cp["tasks"] = tasks
+        questions = [Task.deserialize_question_from_db(q) for q in cp["questions"]]
+        cp["questions"] = questions
         return cp
 
     def get_classes(self, teacher_id: str) -> list[dict]:
