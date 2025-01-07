@@ -435,7 +435,9 @@ def add_carer_cb(reinvite: bool = False):
         carer = cl.get_user(user_id=carer_id)
         carer.user_metadata["care_plan_id"] = st.session_state.cur_care_plan["id"]
         cl.update_user_metadata(carer_id, carer.user_metadata)
-        st.session_state.db_client.sign_in_with_otp(carer.email)
+        st.session_state.db_client.sign_in_with_otp(
+            carer.email, st.secrets["REDIRECT_URL"]
+        )
     else:
         # new carer
         st.session_state.db_client.sign_in_with_otp(
