@@ -334,12 +334,11 @@ def audio_answer_cb(
     unanswered_idx: int,
     container,
 ):
-    with container:
-        with st.spinner("Generating answer transcript"):
-            key = f"answer_{unanswered_idx}"
-            unanswered_questions[unanswered_idx]["answer"] = generate_answer_from_audio(
-                st.session_state[key], unanswered_questions[unanswered_idx]["question"]
-            )
+    with container, st.spinner("Generating answer transcript"):
+        key = f"answer_{unanswered_idx}"
+        unanswered_questions[unanswered_idx]["answer"] = generate_answer_from_audio(
+            st.session_state[key], unanswered_questions[unanswered_idx]["question"]
+        )
         unanswered_questions[unanswered_idx]["updated_at"] = datetime.now()
     st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
         st.session_state.cur_care_plan["id"],
@@ -441,6 +440,7 @@ def add_carer_cb(reinvite: bool = False):
         # new carer
         st.session_state.db_client.sign_in_with_otp(
             st.session_state.invited_carer_email,
+            st.secrets["REDIRECT_URL"],
             st.session_state.cur_care_plan["id"],
             st.session_state.invited_carer_first_name,
             st.session_state.invited_carer_last_name,

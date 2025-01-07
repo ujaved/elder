@@ -59,11 +59,12 @@ class DBClient:
     def sign_in_with_otp(
         self,
         email: str,
+        redirect_url: str,
         care_plan_id: str | None = None,
         first_name: str | None = None,
         last_name: str | None = None,
     ):
-        options = {"email_redirect_to": "http://localhost:8501/?add_carer"}
+        options = {"email_redirect_to": redirect_url}
         if first_name:
             options["data"] = {
                 "first_name": first_name,
