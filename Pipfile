@@ -22,6 +22,8 @@ pyjwt = "*"
 boto3 = "*"
 imageio-ffmpeg = "*"
 streamlit-calendar = "*"
+streamlit-extras = "*"
+parsedatetime = "*"
 
 [dev-packages]
 
