@@ -156,14 +156,18 @@ class DBClient:
             cp["questions"] = questions
         return cps
 
-    def get_care_plan(self, care_plan_id: str) -> dict:
+    def get_care_plan(self, care_plan_id: str) -> dict | None:
         cp = (
             self.client.table("care_plan")
             .select("*")
             .eq("id", care_plan_id)
             .execute()
-            .data[0]
+            .data
         )
+        if cp:
+            cp = cp[0]
+        else:
+            return None
         tasks = [Task.deserialize_from_db(task) for task in cp["tasks"]]
         cp["tasks"] = tasks
         questions = [Task.deserialize_question_from_db(q) for q in cp["questions"]]

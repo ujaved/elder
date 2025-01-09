@@ -424,6 +424,21 @@ def invite_new_carer():
         st.rerun()
 
 
+@st.dialog("Your invitation has expired. Please generate another invitation")
+def carer_invites_themselves():
+    st.text_input("Email", key="invited_carer_email")
+    st.button("Submit", on_click=carer_invites_themselves_cb)
+    if st.session_state.get("reinvite_sent"):
+        st.rerun()
+
+
+def carer_invites_themselves_cb():
+    st.session_state.db_client.sign_in_with_otp(
+        st.session_state.invited_carer_email, st.secrets["REDIRECT_URL"]
+    )
+    st.session_state["reinvite_sent"] = True
+
+
 def add_carer_cb(reinvite: bool = False):
     cl = DBClient(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
     carer_id = st.session_state.cur_care_plan["carer_id"]
@@ -557,13 +572,22 @@ def main():
     elif "add_carer" in st.query_params:
         fragment = get_fragment()
         if fragment:
-            acces_token = (fragment.split("access_token=")[1]).split("&")[0]
+            fields = fragment.split("access_token=")
+            if len(fields) < 2:
+                # access token could not be found. Need to regenerate otp
+                if not st.session_state.get("reinvite_sent"):
+                    carer_invites_themselves()
+                return
+            acces_token = fields[1].split("&")[0]
             payload = jwt.decode(acces_token, options={"verify_signature": False})
             user_id = payload["sub"]
             care_plan_id = payload["user_metadata"]["care_plan_id"]
             st.session_state["cur_care_plan"] = (
                 st.session_state.db_client.get_care_plan(care_plan_id)
             )
+            if not st.session_state["cur_care_plan"]:
+                st.error("No care plan found")
+                return
             if (
                 st.session_state["cur_care_plan"]["carer_id"] != user_id
                 or st.session_state["cur_care_plan"]["carer_status"]
