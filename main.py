@@ -239,11 +239,11 @@ def rerender_care_plan():
     updated = st.session_state.db_client.get_care_plan(
         st.session_state["cur_care_plan"]["id"]
     )
-    highlight_last_row = False
-    if len(updated["tasks"]) > len(st.session_state["cur_care_plan"]["tasks"]):
-        highlight_last_row = True
+    #highlight_last_row = False
+    #if len(updated["tasks"]) > len(st.session_state["cur_care_plan"]["tasks"]):
+    #    highlight_last_row = True
     st.session_state["cur_care_plan"] = updated
-    render_care_plan(highlight_last_row)
+    render_care_plan()
 
 
 def render_tasks(disabled_columns: list[str], container):
