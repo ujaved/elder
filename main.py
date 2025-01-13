@@ -239,8 +239,8 @@ def rerender_care_plan():
     updated = st.session_state.db_client.get_care_plan(
         st.session_state["cur_care_plan"]["id"]
     )
-    #highlight_last_row = False
-    #if len(updated["tasks"]) > len(st.session_state["cur_care_plan"]["tasks"]):
+    # highlight_last_row = False
+    # if len(updated["tasks"]) > len(st.session_state["cur_care_plan"]["tasks"]):
     #    highlight_last_row = True
     st.session_state["cur_care_plan"] = updated
     render_care_plan()
@@ -454,7 +454,12 @@ def add_carer_cb(reinvite: bool = False):
             carer.email, st.secrets["REDIRECT_URL"]
         )
     else:
-        # new carer
+        # new carer, but their email might already exist in the user table
+        carer = cl.get_carer(st.session_state.invited_carer_email)
+        if carer:
+            carer.user_metadata["care_plan_id"] = st.session_state.cur_care_plan["id"]
+            cl.update_user_metadata(carer.id, carer.user_metadata)
+
         st.session_state.db_client.sign_in_with_otp(
             st.session_state.invited_carer_email,
             st.secrets["REDIRECT_URL"],
@@ -462,7 +467,6 @@ def add_carer_cb(reinvite: bool = False):
             st.session_state.invited_carer_first_name,
             st.session_state.invited_carer_last_name,
         )
-        carer = cl.get_carer(st.session_state.invited_carer_email)
 
     name = carer.user_metadata["first_name"] + " " + carer.user_metadata["last_name"]
     if reinvite:
