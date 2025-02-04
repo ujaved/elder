@@ -125,13 +125,21 @@ def parse_time(
 
 def generate_tasks_from_audio(audio) -> tuple[list[dict], list[str]]:
     encoded_string = base64.b64encode(audio.getvalue()).decode("utf-8")
+    system_prompt = """
+    You are a helpful assistant. Each user input will be an audio message containing
+    some instructions and questions for a health aide. An instruction might have a start time
+    and/or an end time. Use the supplied function to parse the instructions and questions in their 
+    respective list format. 
+    """
+    # The user input may also contain some existing instructions and/or questions.
+    # Make usre the final output does not contain duplicates.
     completion = OpenAI().chat.completions.create(
         model="gpt-4o-audio-preview",
         modalities=["text"],
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful assistant. Each user input will be an audio message containing some instructions and questions for a health aide. Each instructions might have a start time and/or an end time. Use the supplied function to parse the instructions and questions in their respective list format.",
+                "content": system_prompt,
             },
             {
                 "role": "user",

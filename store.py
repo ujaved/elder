@@ -1,6 +1,6 @@
 from supabase import create_client, Client
 from enum import Enum
-from datetime import datetime, date
+from datetime import date
 from chatbot import Task
 
 
@@ -23,9 +23,14 @@ class DBClient:
             {"email": email, "password": password}
         ).user
 
-    def get_user(self, user_id: str | None = None, jwt: str | None = None):
+    def get_user(
+        self, user_id: str | None = None, jwt: str | None = None
+    ) -> dict | None:
         if user_id:
-            return self.client.auth.admin.get_user_by_id(user_id).user
+            try:
+                return self.client.auth.admin.get_user_by_id(user_id).user
+            except:
+                return None
         else:
             return self.client.auth.get_user(jwt).user
 
@@ -77,7 +82,7 @@ class DBClient:
     def create_care_plan(self, guardian_id: str, date: date) -> dict:
         return (
             self.client.table("care_plan")
-            .insert({"guardian_id": guardian_id, "date": date.isoformat(), "tasks": []})
+            .insert({"guardian_id": guardian_id, "date": date.isoformat()})
             .execute()
             .data[0]
         )
@@ -85,28 +90,35 @@ class DBClient:
     def delete_care_plan(self, care_plan_id: str):
         return self.client.table("care_plan").delete().eq("id", care_plan_id).execute()
 
+    def create_carer_in_care_plan(self, carer_id: str, care_plan_id: str):
+        self.client.table("carer").insert(
+            {
+                "carer_id": carer_id,
+                "care_plan_id": care_plan_id,
+                "carer_status": Carer_Status.INVITED.value,
+            }
+        ).execute()
+
+    def update_carer_status(
+        self, care_plan_id: str, carer_id: str, carer_status: Carer_Status
+    ):
+        self.client.table("carer").update({"carer_status": carer_status.value}).eq(
+            "care_plan_id", care_plan_id
+        ).eq("carer_id", carer_id).execute()
+
     def update_care_plan(
         self,
         care_plan_id: str,
-        carer_id: str | None = None,
-        carer_status: Carer_Status | None = None,
         tasks: list[dict] | None = None,
         questions: list[dict] | None = None,
     ) -> dict:
-        if carer_id:
-            update = {
-                "carer_id": carer_id,
-                "carer_status": carer_status.value if carer_status else None,
-            }
-        elif carer_status:
-            update = {"carer_status": carer_status.value}
-        elif tasks:
+        if tasks is not None:
             update = {"tasks": [Task.serialize_to_db(task) for task in tasks]}
             if questions:
                 update["questions"] = [
                     Task.serialize_question_to_db(q) for q in questions
                 ]
-        elif questions:
+        elif questions is not None:
             update = {
                 "questions": [Task.serialize_question_to_db(q) for q in questions]
             }
@@ -130,7 +142,17 @@ class DBClient:
             ]
         return updated
 
-    def get_carer_ids(self, guardian_id: str) -> list[str]:
+    def get_carer_ids_for_guardian(self, guardian_id: str) -> list[str]:
+        data = (
+            self.client.table("carer")
+            .select("carer_id, care_plan!inner(id)")
+            .eq("care_plan.guardian_id", guardian_id)
+            .execute()
+            .data
+        )
+        return [d["carer_id"] for d in data]
+
+        """
         carer_ids = (
             self.client.table("care_plan")
             .select("carer_id")
@@ -140,6 +162,26 @@ class DBClient:
             .data
         )
         return list({c["carer_id"] for c in carer_ids})
+        """
+
+    def get_carers(self, care_plan_id: str, carer_id: str | None = None) -> list[dict]:
+        if carer_id:
+            return (
+                self.client.table("carer")
+                .select("*")
+                .eq("care_plan_id", care_plan_id)
+                .eq("carer_id", carer_id)
+                .execute()
+                .data
+            )
+        else:
+            return (
+                self.client.table("carer")
+                .select("*")
+                .eq("care_plan_id", care_plan_id)
+                .execute()
+                .data
+            )
 
     def get_care_plans(self, guardian_id: str) -> list[dict]:
         cps = (
@@ -173,21 +215,3 @@ class DBClient:
         questions = [Task.deserialize_question_from_db(q) for q in cp["questions"]]
         cp["questions"] = questions
         return cp
-
-    def get_classes(self, teacher_id: str) -> list[dict]:
-        return (
-            self.client.table("classes")
-            .select("*")
-            .eq("teacher_id", teacher_id)
-            .execute()
-            .data
-        )
-
-    def get_speakers(self, class_id: str) -> dict:
-        return (
-            self.client.table("speakers")
-            .select("*")
-            .eq("class_id", class_id)
-            .execute()
-            .data
-        )

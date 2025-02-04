@@ -8,6 +8,8 @@ import jwt
 from streamlit_extras.stylable_container import stylable_container
 from chatbot import generate_tasks_from_audio, Task, generate_answer_from_audio
 
+TASKS_PLACEHOLDER = "No tasks yet!"
+QUESTIONS_PLACEHOLDER = "No questions yet!"
 
 calendar_options = {
     "headerToolbar": {
@@ -170,9 +172,13 @@ def task_list_changed():
             if "status" in edit:
                 st.session_state.cur_care_plan["tasks"][r]["status"] = edit["status"]
             if "start_time" in edit:
-                st.session_state.cur_care_plan["tasks"][r]["start_time"] = (
-                    time.fromisoformat(edit["start_time"])
-                )
+                start_time = time.fromisoformat(edit["start_time"])
+                start_time.second = 0
+                if start_time.minute > 30:
+                    start_time.minute = 30
+                elif start_time.minute < 30:
+                    start_time.minute = 0
+                st.session_state.cur_care_plan["tasks"][r]["start_time"] = start_time
 
             if "end_time" in edit:
                 st.session_state.cur_care_plan["tasks"][r]["end_time"] = (
@@ -214,18 +220,40 @@ def task_list_changed():
             )
 
 
-def render_carer_status():
-    carer = DBClient(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"]).get_user(
-        user_id=st.session_state.cur_care_plan["carer_id"]
+def render_carer_status(container):
+    carers = st.session_state.db_client.get_carers(st.session_state.cur_care_plan["id"])
+    carer_df = []
+    for c in carers:
+        carer = DBClient(
+            st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"]
+        ).get_user(user_id=c["carer_id"])
+        name = (
+            carer.user_metadata["first_name"] + " " + carer.user_metadata["last_name"]
+        )
+        carer_status = Carer_Status(c["carer_status"])
+        carer_df.append(
+            {
+                "name": name,
+                "invitation status": carer_status.value,
+                "reinvite?": False if carer_status == Carer_Status.INVITED else "",
+            }
+        )
+
+    if carer_df:
+        container.dataframe(
+            carer_df,
+            hide_index=True,
+            use_container_width=True,
+            column_config={"reinvite?": st.column_config.CheckboxColumn()},
+        )
+    add_carer(
+        container,
+        carer_ids_accepted=[
+            c["carer_id"]
+            for c in carers
+            if Carer_Status(c["carer_status"]) == Carer_Status.ACCEPTED
+        ],
     )
-    name = carer.user_metadata["first_name"] + " " + carer.user_metadata["last_name"]
-    carer_status = Carer_Status(st.session_state.cur_care_plan.get("carer_status"))
-    if carer_status == Carer_Status.INVITED:
-        st.error(f"Carer Invitation is pending for {name}.")
-        if st.button("Reinvite"):
-            add_carer_cb(reinvite=True)
-    else:
-        st.info(f"Carer {name} has accepted the invitation to this care plan.")
 
 
 def delete_plan_cb():
@@ -252,7 +280,7 @@ def render_tasks(disabled_columns: list[str], container):
         st.session_state.cur_care_plan["tasks"], key=lambda t: t.get("updated_at")
     )
     container.data_editor(
-        tasks,
+        tasks if tasks else [{"content": TASKS_PLACEHOLDER}],
         column_config={
             "status": st.column_config.CheckboxColumn(),
             "start_time": st.column_config.TimeColumn(),
@@ -274,9 +302,12 @@ def render_tasks(disabled_columns: list[str], container):
 
 def render_questions(container):
     container.subheader("Questions")
+    questions = sorted(
+        st.session_state.cur_care_plan["questions"], key=lambda t: t.get("updated_at")
+    )
     if date.fromisoformat(st.session_state.cur_care_plan["date"]) < date.today():
         container.dataframe(
-            st.session_state.cur_care_plan["questions"],
+            questions if questions else [{"question": QUESTIONS_PLACEHOLDER}],
             hide_index=True,
             use_container_width=True,
             column_order=(
@@ -288,7 +319,7 @@ def render_questions(container):
     role = Role(st.session_state.user.user_metadata["role"])
     if role == Role.GUARDIAN:
         container.data_editor(
-            st.session_state.cur_care_plan["questions"],
+            questions if questions else [{"question": QUESTIONS_PLACEHOLDER}],
             column_order=("question", "answer"),
             disabled=["answer"],
             hide_index=True,
@@ -299,7 +330,7 @@ def render_questions(container):
         )
         return
     # below is carer logic: answered questions are shown in data editor
-    # and answered questions are shown with audio input
+    # and unanswered questions are shown with audio input
     answered_questions = [
         q for q in st.session_state.cur_care_plan["questions"] if q["answer"]
     ]
@@ -346,55 +377,50 @@ def audio_answer_cb(
     )
 
 
-def render_care_plan(highlight_last_row: bool = False):
-    dt = st.session_state.cur_care_plan["date"]
-    st.info(f"Care plan for {dt}")
-    role = Role(st.session_state.user.user_metadata["role"])
-    col1, col2 = st.columns(2)
-    if role == Role.GUARDIAN and date.fromisoformat(dt) >= date.today():
-        # editable by guardian
+def audio_input_cb():
+    audio = st.session_state.get("audio")
+    if audio is None:
+        return
+    with st.spinner("Transcribing audio"):
+        tasks, questions = generate_tasks_from_audio(audio)
 
-        with stylable_container(
-            key="delete_care_plan",
-            css_styles="""
-              button{
-               float: right;
-              }
-              """,
-        ):
-            st.button("Delete plan", type="primary", on_click=delete_plan_cb)
+    st.session_state.cur_care_plan["tasks"].extend(tasks)
+    st.session_state.cur_care_plan["questions"].extend(questions)
+    st.session_state["cur_care_plan"] = st.session_state.db_client.update_care_plan(
+        st.session_state.cur_care_plan["id"],
+        tasks=st.session_state.cur_care_plan["tasks"],
+        questions=st.session_state.cur_care_plan["questions"],
+    )
 
-        if not st.session_state.cur_care_plan["carer_status"]:
-            add_carer()
-            return
 
-        render_carer_status()
-
-        if st.session_state.cur_care_plan["tasks"]:
+def render_tasks_questions(tab, editable: bool = False):
+    with tab:
+        if editable:
+            st.audio_input(
+                "You can always create a voice recording containing instructions and/or questions",
+                on_change=audio_input_cb,
+                key="audio",
+            )
+            col1, col2 = st.columns(2)
             render_tasks(disabled_columns=["status"], container=col1)
+            # render_task_calendar(col2)
             render_questions(st.container())
         else:
-            audio = st.audio_input(
-                "Please record a care plan memo containing instructions and/or questions"
-            )
-            if audio:
-                with st.spinner("Generating task and question lists"):
-                    tasks, questions = generate_tasks_from_audio(audio)
+            disabled_columns = ["content", "start_time", "end_time"]
+            if (
+                date.fromisoformat(st.session_state.cur_care_plan["date"])
+                < date.today()
+            ):
+                disabled_columns.append("status")
+            col1, col2 = st.columns(2)
+            render_tasks(disabled_columns=disabled_columns, container=col1)
+            # render_task_calendar(col2)
+            render_questions(st.container())
 
-                st.session_state["cur_care_plan"] = (
-                    st.session_state.db_client.update_care_plan(
-                        st.session_state.cur_care_plan["id"],
-                        tasks=tasks,
-                        questions=questions,
-                    )
-                )
-    else:
-        disabled_columns = ["content", "start_time", "end_time"]
-        if date.fromisoformat(dt) < date.today():
-            disabled_columns.append("status")
-        render_tasks(disabled_columns=disabled_columns, container=col1)
-        render_questions(st.container())
-    with col2:
+
+def render_task_calendar(container):
+    dt = st.session_state.cur_care_plan["date"]
+    with container:
         calendar_options["initialDate"] = dt
         calendar(
             events=[
@@ -414,13 +440,38 @@ def render_care_plan(highlight_last_row: bool = False):
         )
 
 
+def render_care_plan():
+    dt = st.session_state.cur_care_plan["date"]
+    role = Role(st.session_state.user.user_metadata["role"])
+    if role == Role.GUARDIAN and date.fromisoformat(dt) >= date.today():
+        with stylable_container(
+            key="delete_care_plan",
+            css_styles="""
+              button{
+               float: right;
+              }
+              """,
+        ):
+            st.button("Delete plan", type="primary", on_click=delete_plan_cb)
+
+        careplan_tab, carer_tab = st.tabs([f"Care plan for {dt}", "Carers"])
+        render_tasks_questions(careplan_tab, editable=True)
+        render_carer_status(carer_tab)
+    else:
+        render_tasks_questions(st.tabs([f"Care plan for {dt}"])[0])
+
+
 @st.dialog("Invite a new carer for this care plan")
 def invite_new_carer():
     st.text_input("Email", key="invited_carer_email")
     st.text_input("First name", key="invited_carer_first_name")
     st.text_input("Last name", key="invited_carer_last_name")
     st.button("Submit", on_click=add_carer_cb)
-    if st.session_state.cur_care_plan["carer_status"]:
+    if st.session_state.get("new_carer_accepted"):
+        del st.session_state["new_carer_accepted"]
+        st.error("This carer has already accepted an invite")
+    if st.session_state.get("new_carer_invite_sent"):
+        del st.session_state["new_carer_invite_sent"]
         st.rerun()
 
 
@@ -441,7 +492,6 @@ def carer_invites_themselves_cb():
 
 def add_carer_cb(reinvite: bool = False):
     cl = DBClient(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-    carer_id = st.session_state.cur_care_plan["carer_id"]
     if st.session_state.get("carer_to_add"):
         # existing carer
         carer_id = st.session_state.carers[st.session_state.carer_to_add][0]
@@ -457,6 +507,16 @@ def add_carer_cb(reinvite: bool = False):
         # new carer, but their email might already exist in the user table
         carer = cl.get_carer(st.session_state.invited_carer_email)
         if carer:
+            # if this carer has already accepted return error message and noop
+            carers = st.session_state.db_client.get_carers(
+                st.session_state.cur_care_plan["id"], carer.id
+            )
+            if (
+                carers
+                and Carer_Status(carers[0]["carer_status"]) == Carer_Status.ACCEPTED
+            ):
+                st.session_state["new_carer_accepted"] = True
+                return
             carer.user_metadata["care_plan_id"] = st.session_state.cur_care_plan["id"]
             cl.update_user_metadata(carer.id, carer.user_metadata)
 
@@ -467,24 +527,31 @@ def add_carer_cb(reinvite: bool = False):
             st.session_state.invited_carer_first_name,
             st.session_state.invited_carer_last_name,
         )
+        carer = cl.get_carer(st.session_state.invited_carer_email)
 
     name = carer.user_metadata["first_name"] + " " + carer.user_metadata["last_name"]
     if reinvite:
         st.info(f"Reinvite sent to carer {name}")
     else:
-        st.info(f"Invite sent to carer {name}")
-        st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
-            st.session_state.cur_care_plan["id"],
-            carer_id=carer.id,
-            carer_status=Carer_Status.INVITED,
+        st.session_state.db_client.create_carer_in_care_plan(
+            carer.id, st.session_state.cur_care_plan["id"]
         )
+        st.session_state["new_carer_invite_sent"] = True
 
 
-def add_carer():
-    st.info("Add an existing carer or invite a new carer")
-    carer_ids = st.session_state.db_client.get_carer_ids(st.session_state.user.id)
+def add_carer(container, carer_ids_accepted: list[str] = []):
+    container.info("Add an existing carer or invite a new carer")
+    carer_ids = st.session_state.db_client.get_carer_ids_for_guardian(
+        st.session_state.user.id
+    )
     cl = DBClient(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-    carer_users = [cl.get_user(user_id=c) for c in carer_ids]
+    carer_users = []
+    for c in carer_ids:
+        if c in carer_ids_accepted:
+            continue
+        u = cl.get_user(user_id=c)
+        if u:
+            carer_users.append(u)
     st.session_state["carers"] = {
         f"{c.user_metadata["first_name"]} {c.user_metadata["last_name"]}": (
             c.id,
@@ -493,10 +560,10 @@ def add_carer():
         for c in carer_users
     }
 
-    col1, col2 = st.columns(2)
+    col1, col2 = container.columns(2)
     with col1:
         if st.session_state.carers:
-            st.selectbox(
+            container.selectbox(
                 "Existing carers",
                 st.session_state.carers.keys(),
                 index=None,
@@ -504,9 +571,9 @@ def add_carer():
                 on_change=add_carer_cb,
             )
         else:
-            st.error("No existing carers found")
+            container.error("No existing carers found")
     with col2:
-        if st.button("Invite a new carer", type="primary"):
+        if container.button("Invite a new carer", type="primary"):
             invite_new_carer()
 
 
@@ -592,20 +659,11 @@ def main():
             if not st.session_state["cur_care_plan"]:
                 st.error("No care plan found")
                 return
-            if (
-                st.session_state["cur_care_plan"]["carer_id"] != user_id
-                or st.session_state["cur_care_plan"]["carer_status"]
-                != Carer_Status.ACCEPTED
-            ):
-                st.session_state["cur_care_plan"] = (
-                    st.session_state.db_client.update_care_plan(
-                        care_plan_id,
-                        carer_id=user_id,
-                        carer_status=Carer_Status.ACCEPTED,
-                    )
-                )
             st.session_state["user"] = st.session_state.db_client.get_user(
                 jwt=acces_token
+            )
+            st.session_state.db_client.update_carer_status(
+                care_plan_id, user_id, Carer_Status.ACCEPTED
             )
             st.rerun()
     else:
