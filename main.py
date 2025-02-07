@@ -173,11 +173,10 @@ def task_list_changed():
                 st.session_state.cur_care_plan["tasks"][r]["status"] = edit["status"]
             if "start_time" in edit:
                 start_time = time.fromisoformat(edit["start_time"])
-                start_time.second = 0
                 if start_time.minute > 30:
-                    start_time.minute = 30
+                    start_time = start_time.replace(minute=30, second=0)
                 elif start_time.minute < 30:
-                    start_time.minute = 0
+                    start_time = start_time.replace(minute=0, second=0)
                 st.session_state.cur_care_plan["tasks"][r]["start_time"] = start_time
 
             if "end_time" in edit:
