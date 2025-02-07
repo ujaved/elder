@@ -262,16 +262,21 @@ def delete_plan_cb():
     st.session_state.pop("date", None)
 
 
-@st.fragment(run_every="10s")
-def rerender_care_plan():
+@st.fragment(run_every="5s")
+def refresh_care_plan(render: bool = False):
+    if not st.session_state.get("cur_care_plan"):
+        if render:
+            st.error("No care plan found")
+        return
     updated = st.session_state.db_client.get_care_plan(
-        st.session_state["cur_care_plan"]["id"]
+        st.session_state.cur_care_plan["id"]
     )
     # highlight_last_row = False
     # if len(updated["tasks"]) > len(st.session_state["cur_care_plan"]["tasks"]):
     #    highlight_last_row = True
-    st.session_state["cur_care_plan"] = updated
-    render_care_plan()
+    st.session_state.cur_care_plan = updated
+    if render:
+        render_care_plan()
 
 
 def render_tasks(disabled_columns: list[str], container):
@@ -588,6 +593,7 @@ def create_care_plan():
         st.session_state["cur_care_plan"] = st.session_state.db_client.create_care_plan(
             guardian_id=st.session_state.user.id, date=st.session_state.date
         )
+    refresh_care_plan()
     render_care_plan()
 
 
@@ -633,7 +639,7 @@ def main():
             )
             pg.run()
         else:
-            rerender_care_plan()
+            refresh_care_plan(render=True)
     elif "reset_password" in st.query_params:
         fragment = get_fragment()
         if fragment:
