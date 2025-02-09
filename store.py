@@ -114,12 +114,12 @@ class DBClient:
             {
                 "caregiver_id": caregiver_id,
                 "care_plan_id": care_plan_id,
-                "caregiver_status": caregiver_Status.INVITED.value,
+                "caregiver_status": Caregiver_Status.INVITED.value,
             }
         ).execute()
 
     def update_caregiver_status(
-        self, care_plan_id: str, caregiver_id: str, caregiver_status: caregiver_Status
+        self, care_plan_id: str, caregiver_id: str, caregiver_status: Caregiver_Status
     ):
         self.client.table("caregiver").update(
             {"caregiver_status": caregiver_status.value}
