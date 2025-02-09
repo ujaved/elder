@@ -239,7 +239,7 @@ def render_caregiver_status(container):
                 "name": name,
                 "invitation status": caregiver_status.value,
                 "reinvite?": (
-                    False if caregiver_status == caregiver_Status.INVITED else ""
+                    False if caregiver_status == Caregiver_Status.INVITED else ""
                 ),
             }
         )
@@ -256,7 +256,7 @@ def render_caregiver_status(container):
         caregiver_ids_accepted=[
             c["caregiver_id"]
             for c in caregivers
-            if caregiver_Status(c["caregiver_status"]) == caregiver_Status.ACCEPTED
+            if Caregiver_Status(c["caregiver_status"]) == Caregiver_Status.ACCEPTED
         ],
     )
 
@@ -523,8 +523,8 @@ def add_caregiver_cb(reinvite: bool = False):
             )
             if (
                 caregivers
-                and caregiver_Status(caregivers[0]["caregiver_status"])
-                == caregiver_Status.ACCEPTED
+                and Caregiver_Status(caregivers[0]["caregiver_status"])
+                == Caregiver_Status.ACCEPTED
             ):
                 st.session_state["new_caregiver_accepted"] = True
                 return
@@ -681,7 +681,7 @@ def main():
                 jwt=acces_token
             )
             st.session_state.db_client.update_caregiver_status(
-                care_plan_id, user_id, caregiver_Status.ACCEPTED
+                care_plan_id, user_id, Caregiver_Status.ACCEPTED
             )
             st.rerun()
     else:
