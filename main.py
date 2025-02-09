@@ -464,7 +464,7 @@ def render_care_plan():
         ):
             st.button("Delete plan", type="primary", on_click=delete_plan_cb)
 
-        careplan_tab, caregiver_tab = st.tabs([f"Care plan for {dt}", "caregivers"])
+        careplan_tab, caregiver_tab = st.tabs([f"Care plan for {dt}", "Caregivers"])
         render_tasks_questions(careplan_tab, editable=True)
         render_caregiver_status(caregiver_tab)
     else:

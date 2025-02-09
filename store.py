@@ -13,14 +13,15 @@ class Role(Enum):
 class Caregiver_Status(Enum):
     INVITED = "INVITED"
     ACCEPTED = "ACCEPTED"
-    
+
+
 @dataclass
 class CaregiverNote:
     caregiver_id: str
     content: str
     created_at: datetime
-    
-    
+
+
 @dataclass
 class CarePlan:
     id: str
@@ -29,7 +30,8 @@ class CarePlan:
     created_at: datetime
     caregivers: list[str]
     caregiver_notes: list[CaregiverNote]
-    
+
+
 class DBClient:
     def __init__(self, supabase_url: str, supabase_key: str) -> Client:
         self.client = create_client(supabase_url, supabase_key)
@@ -55,7 +57,7 @@ class DBClient:
         for user in response:
             if (
                 user.email == email
-                and user.user_metadata["role"] == Role.caregiver.value
+                and user.user_metadata["role"] == Role.CAREGIVER.value
             ):
                 return user
         return None
@@ -93,7 +95,7 @@ class DBClient:
             options["data"] = {
                 "first_name": first_name,
                 "last_name": last_name,
-                "role": Role.caregiver.value,
+                "role": Role.CAREGIVER.value,
                 "care_plan_id": care_plan_id,
             }
         self.client.auth.sign_in_with_otp({"email": email, "options": options})
