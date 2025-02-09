@@ -1,19 +1,35 @@
 from supabase import create_client, Client
 from enum import Enum
-from datetime import date
+from datetime import date, datetime
 from chatbot import Task
+from dataclasses import dataclass
 
 
 class Role(Enum):
     GUARDIAN = "GUARDIAN"
-    CARER = "CARER"
+    CAREGIVER = "CAREGIVER"
 
 
-class Carer_Status(Enum):
+class Caregiver_Status(Enum):
     INVITED = "INVITED"
     ACCEPTED = "ACCEPTED"
-
-
+    
+@dataclass
+class CaregiverNote:
+    caregiver_id: str
+    content: str
+    created_at: datetime
+    
+    
+@dataclass
+class CarePlan:
+    id: str
+    guardian_id: str
+    date: date
+    created_at: datetime
+    caregivers: list[str]
+    caregiver_notes: list[CaregiverNote]
+    
 class DBClient:
     def __init__(self, supabase_url: str, supabase_key: str) -> Client:
         self.client = create_client(supabase_url, supabase_key)
@@ -34,10 +50,13 @@ class DBClient:
         else:
             return self.client.auth.get_user(jwt).user
 
-    def get_carer(self, email: str) -> dict | None:
+    def get_caregiver(self, email: str) -> dict | None:
         response = self.client.auth.admin.list_users()
         for user in response:
-            if user.email == email and user.user_metadata["role"] == Role.CARER.value:
+            if (
+                user.email == email
+                and user.user_metadata["role"] == Role.caregiver.value
+            ):
                 return user
         return None
 
@@ -74,7 +93,7 @@ class DBClient:
             options["data"] = {
                 "first_name": first_name,
                 "last_name": last_name,
-                "role": Role.CARER.value,
+                "role": Role.caregiver.value,
                 "care_plan_id": care_plan_id,
             }
         self.client.auth.sign_in_with_otp({"email": email, "options": options})
@@ -90,21 +109,21 @@ class DBClient:
     def delete_care_plan(self, care_plan_id: str):
         return self.client.table("care_plan").delete().eq("id", care_plan_id).execute()
 
-    def create_carer_in_care_plan(self, carer_id: str, care_plan_id: str):
-        self.client.table("carer").insert(
+    def create_caregiver_in_care_plan(self, caregiver_id: str, care_plan_id: str):
+        self.client.table("caregiver").insert(
             {
-                "carer_id": carer_id,
+                "caregiver_id": caregiver_id,
                 "care_plan_id": care_plan_id,
-                "carer_status": Carer_Status.INVITED.value,
+                "caregiver_status": caregiver_Status.INVITED.value,
             }
         ).execute()
 
-    def update_carer_status(
-        self, care_plan_id: str, carer_id: str, carer_status: Carer_Status
+    def update_caregiver_status(
+        self, care_plan_id: str, caregiver_id: str, caregiver_status: caregiver_Status
     ):
-        self.client.table("carer").update({"carer_status": carer_status.value}).eq(
-            "care_plan_id", care_plan_id
-        ).eq("carer_id", carer_id).execute()
+        self.client.table("caregiver").update(
+            {"caregiver_status": caregiver_status.value}
+        ).eq("care_plan_id", care_plan_id).eq("caregiver_id", caregiver_id).execute()
 
     def update_care_plan(
         self,
@@ -142,41 +161,43 @@ class DBClient:
             ]
         return updated
 
-    def get_carer_ids_for_guardian(self, guardian_id: str) -> list[str]:
+    def get_caregiver_ids_for_guardian(self, guardian_id: str) -> list[str]:
         data = (
-            self.client.table("carer")
-            .select("carer_id, care_plan!inner(id)")
+            self.client.table("caregiver")
+            .select("caregiver_id, care_plan!inner(id)")
             .eq("care_plan.guardian_id", guardian_id)
             .execute()
             .data
         )
-        return [d["carer_id"] for d in data]
+        return [d["caregiver_id"] for d in data]
 
         """
-        carer_ids = (
+        caregiver_ids = (
             self.client.table("care_plan")
-            .select("carer_id")
+            .select("caregiver_id")
             .eq("guardian_id", guardian_id)
-            .not_.is_("carer_id", "null")
+            .not_.is_("caregiver_id", "null")
             .execute()
             .data
         )
-        return list({c["carer_id"] for c in carer_ids})
+        return list({c["caregiver_id"] for c in caregiver_ids})
         """
 
-    def get_carers(self, care_plan_id: str, carer_id: str | None = None) -> list[dict]:
-        if carer_id:
+    def get_caregivers(
+        self, care_plan_id: str, caregiver_id: str | None = None
+    ) -> list[dict]:
+        if caregiver_id:
             return (
-                self.client.table("carer")
+                self.client.table("caregiver")
                 .select("*")
                 .eq("care_plan_id", care_plan_id)
-                .eq("carer_id", carer_id)
+                .eq("caregiver_id", caregiver_id)
                 .execute()
                 .data
             )
         else:
             return (
-                self.client.table("carer")
+                self.client.table("caregiver")
                 .select("*")
                 .eq("care_plan_id", care_plan_id)
                 .execute()

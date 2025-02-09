@@ -1,5 +1,5 @@
 import streamlit as st
-from store import DBClient, Role, Carer_Status
+from store import DBClient, Role, Caregiver_Status
 from datetime import date, datetime, time
 from streamlit_calendar import calendar
 from gotrue.errors import AuthApiError
@@ -219,38 +219,44 @@ def task_list_changed():
             )
 
 
-def render_carer_status(container):
-    carers = st.session_state.db_client.get_carers(st.session_state.cur_care_plan["id"])
-    carer_df = []
-    for c in carers:
-        carer = DBClient(
+def render_caregiver_status(container):
+    caregivers = st.session_state.db_client.get_caregivers(
+        st.session_state.cur_care_plan["id"]
+    )
+    caregiver_df = []
+    for c in caregivers:
+        caregiver = DBClient(
             st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"]
-        ).get_user(user_id=c["carer_id"])
+        ).get_user(user_id=c["caregiver_id"])
         name = (
-            carer.user_metadata["first_name"] + " " + carer.user_metadata["last_name"]
+            caregiver.user_metadata["first_name"]
+            + " "
+            + caregiver.user_metadata["last_name"]
         )
-        carer_status = Carer_Status(c["carer_status"])
-        carer_df.append(
+        caregiver_status = Caregiver_Status(c["caregiver_status"])
+        caregiver_df.append(
             {
                 "name": name,
-                "invitation status": carer_status.value,
-                "reinvite?": False if carer_status == Carer_Status.INVITED else "",
+                "invitation status": caregiver_status.value,
+                "reinvite?": (
+                    False if caregiver_status == caregiver_Status.INVITED else ""
+                ),
             }
         )
 
-    if carer_df:
+    if caregiver_df:
         container.dataframe(
-            carer_df,
+            caregiver_df,
             hide_index=True,
             use_container_width=True,
             column_config={"reinvite?": st.column_config.CheckboxColumn()},
         )
-    add_carer(
+    add_caregiver(
         container,
-        carer_ids_accepted=[
-            c["carer_id"]
-            for c in carers
-            if Carer_Status(c["carer_status"]) == Carer_Status.ACCEPTED
+        caregiver_ids_accepted=[
+            c["caregiver_id"]
+            for c in caregivers
+            if caregiver_Status(c["caregiver_status"]) == caregiver_Status.ACCEPTED
         ],
     )
 
@@ -333,7 +339,7 @@ def render_questions(container):
             on_change=question_list_changed,
         )
         return
-    # below is carer logic: answered questions are shown in data editor
+    # below is caregiver logic: answered questions are shown in data editor
     # and unanswered questions are shown with audio input
     answered_questions = [
         q for q in st.session_state.cur_care_plan["questions"] if q["answer"]
@@ -458,127 +464,134 @@ def render_care_plan():
         ):
             st.button("Delete plan", type="primary", on_click=delete_plan_cb)
 
-        careplan_tab, carer_tab = st.tabs([f"Care plan for {dt}", "Carers"])
+        careplan_tab, caregiver_tab = st.tabs([f"Care plan for {dt}", "caregivers"])
         render_tasks_questions(careplan_tab, editable=True)
-        render_carer_status(carer_tab)
+        render_caregiver_status(caregiver_tab)
     else:
         render_tasks_questions(st.tabs([f"Care plan for {dt}"])[0])
 
 
-@st.dialog("Invite a new carer for this care plan")
-def invite_new_carer():
-    st.text_input("Email", key="invited_carer_email")
-    st.text_input("First name", key="invited_carer_first_name")
-    st.text_input("Last name", key="invited_carer_last_name")
-    st.button("Submit", on_click=add_carer_cb)
-    if st.session_state.get("new_carer_accepted"):
-        del st.session_state["new_carer_accepted"]
-        st.error("This carer has already accepted an invite")
-    if st.session_state.get("new_carer_invite_sent"):
-        del st.session_state["new_carer_invite_sent"]
+@st.dialog("Invite a new caregiver for this care plan")
+def invite_new_caregiver():
+    st.text_input("Email", key="invited_caregiver_email")
+    st.text_input("First name", key="invited_caregiver_first_name")
+    st.text_input("Last name", key="invited_caregiver_last_name")
+    st.button("Submit", on_click=add_caregiver_cb)
+    if st.session_state.get("new_caregiver_accepted"):
+        del st.session_state["new_caregiver_accepted"]
+        st.error("This caregiver has already accepted an invite")
+    if st.session_state.get("new_caregiver_invite_sent"):
+        del st.session_state["new_caregiver_invite_sent"]
         st.rerun()
 
 
 @st.dialog("Your invitation has expired. Please generate another invitation")
-def carer_invites_themselves():
-    st.text_input("Email", key="invited_carer_email")
-    st.button("Submit", on_click=carer_invites_themselves_cb)
+def caregiver_invites_themselves():
+    st.text_input("Email", key="invited_caregiver_email")
+    st.button("Submit", on_click=caregiver_invites_themselves_cb)
     if st.session_state.get("reinvite_sent"):
         st.rerun()
 
 
-def carer_invites_themselves_cb():
+def caregiver_invites_themselves_cb():
     st.session_state.db_client.sign_in_with_otp(
-        st.session_state.invited_carer_email, st.secrets["REDIRECT_URL"]
+        st.session_state.invited_caregiver_email, st.secrets["REDIRECT_URL"]
     )
     st.session_state["reinvite_sent"] = True
 
 
-def add_carer_cb(reinvite: bool = False):
+def add_caregiver_cb(reinvite: bool = False):
     cl = DBClient(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-    if st.session_state.get("carer_to_add"):
-        # existing carer
-        carer_id = st.session_state.carers[st.session_state.carer_to_add][0]
+    if st.session_state.get("caregiver_to_add"):
+        # existing caregiver
+        caregiver_id = st.session_state.caregivers[st.session_state.caregiver_to_add][0]
 
-    if st.session_state.get("carer_to_add") or reinvite:
-        carer = cl.get_user(user_id=carer_id)
-        carer.user_metadata["care_plan_id"] = st.session_state.cur_care_plan["id"]
-        cl.update_user_metadata(carer_id, carer.user_metadata)
+    if st.session_state.get("caregiver_to_add") or reinvite:
+        caregiver = cl.get_user(user_id=caregiver_id)
+        caregiver.user_metadata["care_plan_id"] = st.session_state.cur_care_plan["id"]
+        cl.update_user_metadata(caregiver_id, caregiver.user_metadata)
         st.session_state.db_client.sign_in_with_otp(
-            carer.email, st.secrets["REDIRECT_URL"]
+            caregiver.email, st.secrets["REDIRECT_URL"]
         )
     else:
-        # new carer, but their email might already exist in the user table
-        carer = cl.get_carer(st.session_state.invited_carer_email)
-        if carer:
-            # if this carer has already accepted return error message and noop
-            carers = st.session_state.db_client.get_carers(
-                st.session_state.cur_care_plan["id"], carer.id
+        # new caregiver, but their email might already exist in the user table
+        caregiver = cl.get_caregiver(st.session_state.invited_caregiver_email)
+        if caregiver:
+            # if this caregiver has already accepted return error message and noop
+            caregivers = st.session_state.db_client.get_caregivers(
+                st.session_state.cur_care_plan["id"], caregiver.id
             )
             if (
-                carers
-                and Carer_Status(carers[0]["carer_status"]) == Carer_Status.ACCEPTED
+                caregivers
+                and caregiver_Status(caregivers[0]["caregiver_status"])
+                == caregiver_Status.ACCEPTED
             ):
-                st.session_state["new_carer_accepted"] = True
+                st.session_state["new_caregiver_accepted"] = True
                 return
-            carer.user_metadata["care_plan_id"] = st.session_state.cur_care_plan["id"]
-            cl.update_user_metadata(carer.id, carer.user_metadata)
+            caregiver.user_metadata["care_plan_id"] = st.session_state.cur_care_plan[
+                "id"
+            ]
+            cl.update_user_metadata(caregiver.id, caregiver.user_metadata)
 
         st.session_state.db_client.sign_in_with_otp(
-            st.session_state.invited_carer_email,
+            st.session_state.invited_caregiver_email,
             st.secrets["REDIRECT_URL"],
             st.session_state.cur_care_plan["id"],
-            st.session_state.invited_carer_first_name,
-            st.session_state.invited_carer_last_name,
+            st.session_state.invited_caregiver_first_name,
+            st.session_state.invited_caregiver_last_name,
         )
-        carer = cl.get_carer(st.session_state.invited_carer_email)
+        caregiver = cl.get_caregiver(st.session_state.invited_caregiver_email)
 
-    name = carer.user_metadata["first_name"] + " " + carer.user_metadata["last_name"]
+    name = (
+        caregiver.user_metadata["first_name"]
+        + " "
+        + caregiver.user_metadata["last_name"]
+    )
     if reinvite:
-        st.info(f"Reinvite sent to carer {name}")
+        st.info(f"Reinvite sent to caregiver {name}")
     else:
-        st.session_state.db_client.create_carer_in_care_plan(
-            carer.id, st.session_state.cur_care_plan["id"]
+        st.session_state.db_client.create_caregiver_in_care_plan(
+            caregiver.id, st.session_state.cur_care_plan["id"]
         )
-        st.session_state["new_carer_invite_sent"] = True
+        st.session_state["new_caregiver_invite_sent"] = True
 
 
-def add_carer(container, carer_ids_accepted: list[str] = []):
-    container.info("Add an existing carer or invite a new carer")
-    carer_ids = st.session_state.db_client.get_carer_ids_for_guardian(
+def add_caregiver(container, caregiver_ids_accepted: list[str] = []):
+    container.info("Add an existing caregiver or invite a new caregiver")
+    caregiver_ids = st.session_state.db_client.get_caregiver_ids_for_guardian(
         st.session_state.user.id
     )
     cl = DBClient(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-    carer_users = []
-    for c in carer_ids:
-        if c in carer_ids_accepted:
+    caregiver_users = []
+    for c in caregiver_ids:
+        if c in caregiver_ids_accepted:
             continue
         u = cl.get_user(user_id=c)
         if u:
-            carer_users.append(u)
-    st.session_state["carers"] = {
+            caregiver_users.append(u)
+    st.session_state["caregivers"] = {
         f"{c.user_metadata["first_name"]} {c.user_metadata["last_name"]}": (
             c.id,
             c.email,
         )
-        for c in carer_users
+        for c in caregiver_users
     }
 
     col1, col2 = container.columns(2)
     with col1:
-        if st.session_state.carers:
+        if st.session_state.caregivers:
             container.selectbox(
-                "Existing carers",
-                st.session_state.carers.keys(),
+                "Existing caregivers",
+                st.session_state.caregivers.keys(),
                 index=None,
-                key="carer_to_add",
-                on_change=add_carer_cb,
+                key="caregiver_to_add",
+                on_change=add_caregiver_cb,
             )
         else:
-            container.error("No existing carers found")
+            container.error("No existing caregivers found")
     with col2:
-        if container.button("Invite a new carer", type="primary"):
-            invite_new_carer()
+        if container.button("Invite a new caregiver", type="primary"):
+            invite_new_caregiver()
 
 
 def create_care_plan():
@@ -645,14 +658,14 @@ def main():
             acces_token = (fragment.split("access_token=")[1]).split("&")[0]
             payload = jwt.decode(acces_token, options={"verify_signature": False})
             reset_password(payload["email"], payload["sub"])
-    elif "add_carer" in st.query_params:
+    elif "add_caregiver" in st.query_params:
         fragment = get_fragment()
         if fragment:
             fields = fragment.split("access_token=")
             if len(fields) < 2:
                 # access token could not be found. Need to regenerate otp
                 if not st.session_state.get("reinvite_sent"):
-                    carer_invites_themselves()
+                    caregiver_invites_themselves()
                 return
             acces_token = fields[1].split("&")[0]
             payload = jwt.decode(acces_token, options={"verify_signature": False})
@@ -667,8 +680,8 @@ def main():
             st.session_state["user"] = st.session_state.db_client.get_user(
                 jwt=acces_token
             )
-            st.session_state.db_client.update_carer_status(
-                care_plan_id, user_id, Carer_Status.ACCEPTED
+            st.session_state.db_client.update_caregiver_status(
+                care_plan_id, user_id, caregiver_Status.ACCEPTED
             )
             st.rerun()
     else:
