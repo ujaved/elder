@@ -7,6 +7,7 @@ from streamlit_url_fragment import get_fragment
 import jwt
 from streamlit_extras.stylable_container import stylable_container
 from chatbot import generate_tasks_from_audio, Task, generate_answer_from_audio
+from utils import add_time, get_diff_time
 
 TASKS_PLACEHOLDER = "No tasks yet!"
 QUESTIONS_PLACEHOLDER = "No questions yet!"
@@ -167,26 +168,36 @@ def task_list_changed():
 
     if st.session_state.task_list_changed["edited_rows"]:
         for r, edit in st.session_state.task_list_changed["edited_rows"].items():
+            existing_duration = None
             if "content" in edit:
                 st.session_state.cur_care_plan["tasks"][r]["content"] = edit["content"]
             if "status" in edit:
                 st.session_state.cur_care_plan["tasks"][r]["status"] = edit["status"]
             if "start_time" in edit:
+                start_time = st.session_state.cur_care_plan["tasks"][r].get(
+                    "start_time"
+                )
+                end_time = st.session_state.cur_care_plan["tasks"][r].get("end_time")
+                if start_time and end_time:
+                    existing_duration = get_diff_time(start_time, end_time)
                 start_time = time.fromisoformat(edit["start_time"])
                 if start_time.minute > 30:
                     start_time = start_time.replace(minute=30, second=0)
                 elif start_time.minute < 30:
                     start_time = start_time.replace(minute=0, second=0)
                 st.session_state.cur_care_plan["tasks"][r]["start_time"] = start_time
+                if existing_duration:
+                    st.session_state.cur_care_plan["tasks"][r]["end_time"] = add_time(
+                        start_time, existing_duration[0], existing_duration[1]
+                    )
+                else:
+                    st.session_state.cur_care_plan["tasks"][r]["end_time"] = add_time(
+                        start_time, 0, 30
+                    )
 
             if "end_time" in edit:
                 st.session_state.cur_care_plan["tasks"][r]["end_time"] = (
                     time.fromisoformat(edit["end_time"])
-                )
-            elif "start_time" in edit:
-                start_time = st.session_state.cur_care_plan["tasks"][r]["start_time"]
-                st.session_state.cur_care_plan["tasks"][r]["end_time"] = time(
-                    hour=start_time.hour, minute=start_time.minute + 30
                 )
             st.session_state.cur_care_plan["tasks"][r]["updated_time"] = datetime.now()
 
@@ -262,6 +273,8 @@ def render_caregiver_status(container):
 
 
 def delete_plan_cb():
+    if not st.session_state.get("cur_care_plan"):
+        return
     st.session_state.db_client.delete_care_plan(st.session_state.cur_care_plan["id"])
     st.session_state.pop("cur_care_plan", None)
     st.session_state.pop("date", None)
@@ -293,8 +306,8 @@ def render_tasks(disabled_columns: list[str], container):
         tasks if tasks else [{"content": TASKS_PLACEHOLDER}],
         column_config={
             "status": st.column_config.CheckboxColumn(),
-            "start_time": st.column_config.TimeColumn(),
-            "end_time": st.column_config.TimeColumn(),
+            "start_time": st.column_config.TimeColumn(step=1800),
+            "end_time": st.column_config.TimeColumn(step=1800),
         },
         column_order=("content", "start_time", "end_time", "status"),
         disabled=disabled_columns,
