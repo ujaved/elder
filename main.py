@@ -1,12 +1,12 @@
 import streamlit as st
-from store import DBClient, Role, Caregiver_Status
+from store import DBClient, Role, Caregiver_Status, CarePlan, Question, Task
 from datetime import date, datetime, time
 from streamlit_calendar import calendar
 from gotrue.errors import AuthApiError
 from streamlit_url_fragment import get_fragment
 import jwt
 from streamlit_extras.stylable_container import stylable_container
-from chatbot import generate_tasks_from_audio, Task, generate_answer_from_audio
+from chatbot import generate_tasks_from_audio, generate_answer_from_audio
 from utils import add_time, get_diff_time
 
 TASKS_PLACEHOLDER = "No tasks yet!"
@@ -109,149 +109,108 @@ def reset_password_submit(user_id: str):
 
 
 def question_list_changed():
+    cp: CarePlan = st.session_state.cur_care_plan
     if st.session_state.question_list_changed["deleted_rows"]:
         for r in st.session_state.question_list_changed["deleted_rows"]:
-            del st.session_state.cur_care_plan["questions"][r]
-        st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
-            st.session_state.cur_care_plan["id"],
-            questions=st.session_state.cur_care_plan["questions"],
-        )
+            del cp.questions[r]
+        cp = st.session_state.db_client.update_care_plan(cp.id, questions=cp.questions)
 
     if st.session_state.question_list_changed["edited_rows"]:
         for r, edit in st.session_state.question_list_changed["edited_rows"].items():
             if "question" in edit:
-                st.session_state.cur_care_plan["questions"][r]["question"] = edit[
-                    "question"
-                ]
+                cp.questions[r].question = edit["question"]
             if "answer" in edit:
-                st.session_state.cur_care_plan["questions"][r]["answer"] = edit[
-                    "answer"
-                ]
-            st.session_state.cur_care_plan["questions"][r][
-                "updated_time"
-            ] = datetime.now()
-
-        st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
-            st.session_state.cur_care_plan["id"],
-            questions=st.session_state.cur_care_plan["questions"],
-        )
+                cp.questions[r].answer = edit["answer"]
+            cp.questions[r].updated_at = datetime.now()
+        cp = st.session_state.db_client.update_care_plan(cp.id, questions=cp.questions)
 
     if st.session_state.question_list_changed["added_rows"]:
-        added = []
-        for r in st.session_state.question_list_changed["added_rows"]:
-            if not r.get("question"):
-                continue
-            question = {
-                "question": r.get("question"),
-                "answer": "",
-                "updated_at": datetime.now().isoformat(),
-            }
-            added.append(Task.deserialize_question_from_db(question))
-        if added:
-            st.session_state.cur_care_plan["questions"].extend(added)
-            st.session_state.cur_care_plan = (
-                st.session_state.db_client.update_care_plan(
-                    st.session_state.cur_care_plan["id"],
-                    questions=st.session_state.cur_care_plan["questions"],
-                )
-            )
+        added = [
+            Question(r["question"], "")
+            for r in st.session_state.question_list_changed["added_rows"]
+            if r.get("question")
+        ]
+        cp.questions.extend(added)
+        cp = st.session_state.db_client.update_care_plan(cp.id, questions=cp.questions)
+
+    st.session_state.cur_care_plan = cp
 
 
 def task_list_changed():
+    cp: CarePlan = st.session_state.cur_care_plan
     if st.session_state.task_list_changed["deleted_rows"]:
         for r in st.session_state.task_list_changed["deleted_rows"]:
-            del st.session_state.cur_care_plan["tasks"][r]
-        st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
-            st.session_state.cur_care_plan["id"],
-            tasks=st.session_state.cur_care_plan["tasks"],
-        )
+            del cp.tasks[r]
+        cp = st.session_state.db_client.update_care_plan(cp.id, tasks=cp.tasks)
 
     if st.session_state.task_list_changed["edited_rows"]:
         for r, edit in st.session_state.task_list_changed["edited_rows"].items():
             existing_duration = None
             if "content" in edit:
-                st.session_state.cur_care_plan["tasks"][r]["content"] = edit["content"]
+                cp.tasks[r].content = edit["content"]
             if "status" in edit:
-                st.session_state.cur_care_plan["tasks"][r]["status"] = edit["status"]
+                cp.tasks[r].status = edit["status"]
             if "start_time" in edit:
-                start_time = st.session_state.cur_care_plan["tasks"][r].get(
-                    "start_time"
-                )
-                end_time = st.session_state.cur_care_plan["tasks"][r].get("end_time")
-                if start_time and end_time:
-                    existing_duration = get_diff_time(start_time, end_time)
+                if cp.tasks[r].start_time and cp.tasks[r].end_time:
+                    existing_duration = get_diff_time(
+                        cp.tasks[r].start_time, cp.tasks[r].end_time
+                    )
                 start_time = time.fromisoformat(edit["start_time"])
                 if start_time.minute > 30:
                     start_time = start_time.replace(minute=30, second=0)
                 elif start_time.minute < 30:
                     start_time = start_time.replace(minute=0, second=0)
-                st.session_state.cur_care_plan["tasks"][r]["start_time"] = start_time
+                cp.tasks[r].start_time = start_time
                 if existing_duration:
-                    st.session_state.cur_care_plan["tasks"][r]["end_time"] = add_time(
+                    cp.tasks[r].end_time = add_time(
                         start_time, existing_duration[0], existing_duration[1]
                     )
                 else:
-                    st.session_state.cur_care_plan["tasks"][r]["end_time"] = add_time(
-                        start_time, 0, 30
-                    )
+                    cp.tasks[r].end_time = add_time(start_time, 0, 30)
 
             if "end_time" in edit:
-                st.session_state.cur_care_plan["tasks"][r]["end_time"] = (
-                    time.fromisoformat(edit["end_time"])
-                )
-            st.session_state.cur_care_plan["tasks"][r]["updated_time"] = datetime.now()
+                cp.tasks[r].end_time = time.fromisoformat(edit["end_time"])
+            cp.tasks[r].updated_at = datetime.now()
 
-        st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
-            st.session_state.cur_care_plan["id"],
-            tasks=st.session_state.cur_care_plan["tasks"],
-        )
+        cp = st.session_state.db_client.update_care_plan(cp.id, tasks=cp.tasks)
 
     if st.session_state.task_list_changed["added_rows"]:
-        added = []
-        for r in st.session_state.task_list_changed["added_rows"]:
-            content = r.get("content")
-            if not content:
-                continue
-            task = {
-                "content": content,
-                "status": False,
-                "start_time": r.get("start_time"),
-                "end_time": r.get("end_time"),
-                "updated_at": datetime.now().isoformat(),
-            }
-            added.append(Task.deserialize_from_db(task))
-        if added:
-            st.session_state.cur_care_plan["tasks"].extend(added)
-            st.session_state.cur_care_plan = (
-                st.session_state.db_client.update_care_plan(
-                    st.session_state.cur_care_plan["id"],
-                    tasks=st.session_state.cur_care_plan["tasks"],
-                )
+        added = [
+            Task(
+                r["content"],
+                (
+                    time.fromisoformat(r.get("start_time"))
+                    if r.get("start_time")
+                    else None
+                ),
+                time.fromisoformat(r.get("end_time")) if r.get("end_time") else None,
             )
+            for r in st.session_state.task_list_changed["added_rows"]
+            if r.get("content")
+        ]
+        cp.tasks.extend(added)
+        cp = st.session_state.db_client.update_care_plan(cp.id, tasks=cp.tasks)
+
+    st.session_state.cur_care_plan = cp
 
 
 def render_caregiver_status(container):
-    caregivers = st.session_state.db_client.get_caregivers(
-        st.session_state.cur_care_plan["id"]
-    )
+    cp: CarePlan = st.session_state.cur_care_plan
     caregiver_df = []
-    for c in caregivers:
+    for cg in cp.caregivers:
         caregiver = DBClient(
             st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"]
-        ).get_user(user_id=c["caregiver_id"])
+        ).get_user(user_id=cg.id)
         name = (
             caregiver.user_metadata["first_name"]
             + " "
             + caregiver.user_metadata["last_name"]
         )
-        caregiver_status = Caregiver_Status(c["caregiver_status"])
         caregiver_df.append(
             {
                 "name": name,
-                "invitation status": caregiver_status.value,
-                "reinvite?": (
-                    False if caregiver_status == Caregiver_Status.INVITED else ""
-                ),
+                "invitation status": cg.status.value,
+                "reinvite?": (False if cg.status == Caregiver_Status.INVITED else ""),
             }
         )
 
@@ -265,45 +224,42 @@ def render_caregiver_status(container):
     add_caregiver(
         container,
         caregiver_ids_accepted=[
-            c["caregiver_id"]
-            for c in caregivers
-            if Caregiver_Status(c["caregiver_status"]) == Caregiver_Status.ACCEPTED
+            cg.id for cg in cp.caregivers if cg.status == Caregiver_Status.ACCEPTED
         ],
     )
 
 
 def delete_plan_cb():
-    if not st.session_state.get("cur_care_plan"):
+    cp: CarePlan = st.session_state.get("cur_care_plan")
+    if not cp:
         return
-    st.session_state.db_client.delete_care_plan(st.session_state.cur_care_plan["id"])
+    st.session_state.db_client.delete_care_plan(cp.id)
     st.session_state.pop("cur_care_plan", None)
     st.session_state.pop("date", None)
 
 
 @st.fragment(run_every="5s")
 def refresh_care_plan(render: bool = False):
-    if not st.session_state.get("cur_care_plan"):
+    cp: CarePlan = st.session_state.get("cur_care_plan")
+    if not cp:
         if render:
             st.error("No care plan found")
         return
-    updated = st.session_state.db_client.get_care_plan(
-        st.session_state.cur_care_plan["id"]
-    )
-    # highlight_last_row = False
-    # if len(updated["tasks"]) > len(st.session_state["cur_care_plan"]["tasks"]):
-    #    highlight_last_row = True
-    st.session_state.cur_care_plan = updated
+    st.session_state.cur_care_plan = st.session_state.db_client.get_care_plan(cp.id)
     if render:
         render_care_plan()
 
 
 def render_tasks(disabled_columns: list[str], container):
+    cp: CarePlan = st.session_state.cur_care_plan
     container.subheader("Tasks")
-    tasks = sorted(
-        st.session_state.cur_care_plan["tasks"], key=lambda t: t.get("updated_at")
-    )
+    # tasks = sorted(cp.tasks, key=lambda t: t.updated_at)
     container.data_editor(
-        tasks if tasks else [{"content": TASKS_PLACEHOLDER}],
+        (
+            [t.serialize_to_db(serialize_time=False) for t in cp.tasks]
+            if cp.tasks
+            else [{"content": TASKS_PLACEHOLDER}]
+        ),
         column_config={
             "status": st.column_config.CheckboxColumn(),
             "start_time": st.column_config.TimeColumn(step=1800),
@@ -317,20 +273,19 @@ def render_tasks(disabled_columns: list[str], container):
         key="task_list_changed",
         on_change=task_list_changed,
     )
-    # if highlight_last_row:
-    #    df = df.style.map(
-    #        lambda _: "background-color: red;", subset=(df.index[-1], slice(None))
-    #    )
 
 
 def render_questions(container):
+    cp: CarePlan = st.session_state.cur_care_plan
     container.subheader("Questions")
-    questions = sorted(
-        st.session_state.cur_care_plan["questions"], key=lambda t: t.get("updated_at")
-    )
-    if date.fromisoformat(st.session_state.cur_care_plan["date"]) < date.today():
+    # questions = sorted(cp.questions, key=lambda t: t.updated_at)
+    if cp.date < date.today():
         container.dataframe(
-            questions if questions else [{"question": QUESTIONS_PLACEHOLDER}],
+            (
+                [q.serialize_to_db() for q in cp.questions]
+                if cp.questions
+                else [{"question": QUESTIONS_PLACEHOLDER}]
+            ),
             hide_index=True,
             use_container_width=True,
             column_order=(
@@ -342,7 +297,11 @@ def render_questions(container):
     role = Role(st.session_state.user.user_metadata["role"])
     if role == Role.GUARDIAN:
         container.data_editor(
-            questions if questions else [{"question": QUESTIONS_PLACEHOLDER}],
+            (
+                [q.serialize_to_db() for q in cp.questions]
+                if cp.questions
+                else [{"question": QUESTIONS_PLACEHOLDER}]
+            ),
             column_order=("question", "answer"),
             disabled=["answer"],
             hide_index=True,
@@ -354,12 +313,8 @@ def render_questions(container):
         return
     # below is caregiver logic: answered questions are shown in data editor
     # and unanswered questions are shown with audio input
-    answered_questions = [
-        q for q in st.session_state.cur_care_plan["questions"] if q["answer"]
-    ]
-    unanswered_questions = [
-        q for q in st.session_state.cur_care_plan["questions"] if not q["answer"]
-    ]
+    answered_questions = [q.serialize_to_db() for q in cp.questions if q.answer]
+    unanswered_questions = [q.serialize_to_db() for q in cp.questions if not q.answer]
     if answered_questions:
         container.data_editor(
             answered_questions,
@@ -417,6 +372,7 @@ def audio_input_cb():
 
 
 def render_tasks_questions(tab, editable: bool = False):
+    cp: CarePlan = st.session_state.cur_care_plan
     with tab:
         if editable:
             st.audio_input(
@@ -430,10 +386,7 @@ def render_tasks_questions(tab, editable: bool = False):
             render_questions(st.container())
         else:
             disabled_columns = ["content", "start_time", "end_time"]
-            if (
-                date.fromisoformat(st.session_state.cur_care_plan["date"])
-                < date.today()
-            ):
+            if cp.date < date.today():
                 disabled_columns.append("status")
             col1, col2 = st.columns(2)
             render_tasks(disabled_columns=disabled_columns, container=col1)
@@ -464,9 +417,9 @@ def render_task_calendar(container):
 
 
 def render_care_plan():
-    dt = st.session_state.cur_care_plan["date"]
+    cp: CarePlan = st.session_state.cur_care_plan
     role = Role(st.session_state.user.user_metadata["role"])
-    if role == Role.GUARDIAN and date.fromisoformat(dt) >= date.today():
+    if role == Role.GUARDIAN and cp.date >= date.today():
         with stylable_container(
             key="delete_care_plan",
             css_styles="""
@@ -477,11 +430,13 @@ def render_care_plan():
         ):
             st.button("Delete plan", type="primary", on_click=delete_plan_cb)
 
-        careplan_tab, caregiver_tab = st.tabs([f"Care plan for {dt}", "Caregivers"])
+        careplan_tab, caregiver_tab = st.tabs(
+            [f"Care plan for {cp.date}", "Caregivers"]
+        )
         render_tasks_questions(careplan_tab, editable=True)
         render_caregiver_status(caregiver_tab)
     else:
-        render_tasks_questions(st.tabs([f"Care plan for {dt}"])[0])
+        render_tasks_questions(st.tabs([f"Care plan for {cp.date}"])[0])
 
 
 @st.dialog("Invite a new caregiver for this care plan")
@@ -514,6 +469,7 @@ def caregiver_invites_themselves_cb():
 
 
 def add_caregiver_cb(reinvite: bool = False):
+    cp: CarePlan = st.session_state.cur_care_plan
     cl = DBClient(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
     if st.session_state.get("caregiver_to_add"):
         # existing caregiver
@@ -521,19 +477,17 @@ def add_caregiver_cb(reinvite: bool = False):
 
     if st.session_state.get("caregiver_to_add") or reinvite:
         caregiver = cl.get_user(user_id=caregiver_id)
-        caregiver.user_metadata["care_plan_id"] = st.session_state.cur_care_plan["id"]
+        caregiver.user_metadata["care_plan_id"] = cp.id
         cl.update_user_metadata(caregiver_id, caregiver.user_metadata)
         st.session_state.db_client.sign_in_with_otp(
             caregiver.email, st.secrets["REDIRECT_URL"]
         )
     else:
         # new caregiver, but their email might already exist in the user table
-        caregiver = cl.get_caregiver(st.session_state.invited_caregiver_email)
+        caregiver = cl.get_caregiver_user(st.session_state.invited_caregiver_email)
         if caregiver:
             # if this caregiver has already accepted return error message and noop
-            caregivers = st.session_state.db_client.get_caregivers(
-                st.session_state.cur_care_plan["id"], caregiver.id
-            )
+            caregivers = st.session_state.db_client.get_caregivers(cp.id, caregiver.id)
             if (
                 caregivers
                 and Caregiver_Status(caregivers[0]["caregiver_status"])
@@ -541,19 +495,17 @@ def add_caregiver_cb(reinvite: bool = False):
             ):
                 st.session_state["new_caregiver_accepted"] = True
                 return
-            caregiver.user_metadata["care_plan_id"] = st.session_state.cur_care_plan[
-                "id"
-            ]
+            caregiver.user_metadata["care_plan_id"] = cp.id
             cl.update_user_metadata(caregiver.id, caregiver.user_metadata)
 
         st.session_state.db_client.sign_in_with_otp(
             st.session_state.invited_caregiver_email,
             st.secrets["REDIRECT_URL"],
-            st.session_state.cur_care_plan["id"],
+            cp.id,
             st.session_state.invited_caregiver_first_name,
             st.session_state.invited_caregiver_last_name,
         )
-        caregiver = cl.get_caregiver(st.session_state.invited_caregiver_email)
+        caregiver = cl.get_caregiver_user(st.session_state.invited_caregiver_email)
 
     name = (
         caregiver.user_metadata["first_name"]
@@ -563,9 +515,7 @@ def add_caregiver_cb(reinvite: bool = False):
     if reinvite:
         st.info(f"Reinvite sent to caregiver {name}")
     else:
-        st.session_state.db_client.create_caregiver_in_care_plan(
-            caregiver.id, st.session_state.cur_care_plan["id"]
-        )
+        st.session_state.db_client.create_caregiver_in_care_plan(caregiver.id, cp.id)
         st.session_state["new_caregiver_invite_sent"] = True
 
 
@@ -608,23 +558,25 @@ def add_caregiver(container, caregiver_ids_accepted: list[str] = []):
 
 
 def create_care_plan():
-    cur_care_plan = st.session_state.get("cur_care_plan")
-    if cur_care_plan and date.fromisoformat(cur_care_plan["date"]) < date.today():
+    cur_care_plan: CarePlan = st.session_state.get("cur_care_plan")
+    if cur_care_plan and cur_care_plan.date < date.today():
         del st.session_state["cur_care_plan"]
-    if not st.session_state.get("cur_care_plan"):
+        cur_care_plan = None
+    if not cur_care_plan:
         st.date_input("Date", value=None, min_value=date.today(), key="date")
         if not st.session_state.date:
             return
         st.session_state["cur_care_plan"] = st.session_state.db_client.create_care_plan(
             guardian_id=st.session_state.user.id, date=st.session_state.date
         )
-    refresh_care_plan()
     render_care_plan()
 
 
 def care_plans():
-    care_plans = st.session_state.db_client.get_care_plans(st.session_state.user.id)
-    care_plans = {cp["date"]: cp for cp in care_plans}
+    care_plans: list[CarePlan] = st.session_state.db_client.get_care_plans(
+        st.session_state.user.id
+    )
+    care_plans = {cp.date: cp for cp in care_plans}
     sorted_dates = sorted(list(care_plans.keys()), reverse=True)
     if care_plans:
         dt = st.sidebar.selectbox(
@@ -647,6 +599,7 @@ def main():
     if st.session_state.get("user"):
         role = Role(st.session_state.user.user_metadata["role"])
         if role == Role.GUARDIAN:
+            refresh_care_plan()
             pg = st.navigation(
                 [
                     st.Page(

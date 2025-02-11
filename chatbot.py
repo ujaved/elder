@@ -3,7 +3,8 @@ import base64
 from openai import OpenAI, pydantic_function_tool
 import json
 from datetime import datetime, date, time
-import parsedatetime
+from store import Task as CarePlanTask, Question
+from utils import add_time
 
 
 class TimeOfDay(BaseModel):
@@ -20,7 +21,7 @@ class Task(BaseModel):
     end_time: TimeOfDay | None = Field(description="end time of task")
     content: str = Field(description="content of the instruction")
 
-    def deserialize(self) -> dict:
+    def deserialize(self) -> CarePlanTask:
         start_time = (
             time(hour=self.start_time.hour, minute=self.start_time.minute)
             if self.start_time
@@ -29,9 +30,12 @@ class Task(BaseModel):
         if self.end_time:
             end_time = time(hour=self.end_time.hour, minute=self.end_time.minute)
         elif start_time:
-            end_time = time(hour=start_time.hour, minute=start_time.minute + 30)
+            end_time = add_time(start_time, 0, 30)
         else:
             end_time = None
+        return CarePlanTask(
+            content=self.content, start_time=start_time, end_time=end_time
+        )
 
         """    
         start_time = parse_time(self.start_time, self.content, reference_date)
@@ -45,55 +49,6 @@ class Task(BaseModel):
         else:
             end_time = None
         """
-        return {
-            "start_time": start_time,
-            "end_time": end_time,
-            "content": self.content,
-            "status": False,
-            "updated_at": datetime.now(),
-        }
-
-    @staticmethod
-    def deserialize_from_db(task: dict) -> dict:
-        return {
-            "content": task["content"],
-            "start_time": (
-                time.fromisoformat(task["start_time"]) if task["start_time"] else None
-            ),
-            "end_time": (
-                time.fromisoformat(task["end_time"]) if task["end_time"] else None
-            ),
-            "status": task["status"],
-            "updated_at": datetime.fromisoformat(task["updated_at"]),
-        }
-
-    @staticmethod
-    def serialize_to_db(task: dict) -> dict:
-        return {
-            "content": task["content"],
-            "status": task["status"],
-            "updated_at": task["updated_at"].isoformat(),
-            "start_time": (
-                task["start_time"].isoformat() if task["start_time"] else None
-            ),
-            "end_time": (task["end_time"].isoformat() if task["end_time"] else None),
-        }
-
-    @staticmethod
-    def serialize_question_to_db(question: dict) -> dict:
-        return {
-            "question": question["question"],
-            "answer": question["answer"],
-            "updated_at": question["updated_at"].isoformat(),
-        }
-
-    @staticmethod
-    def deserialize_question_from_db(question: dict) -> dict:
-        return {
-            "question": question["question"],
-            "answer": question["answer"],
-            "updated_at": datetime.fromisoformat(question["updated_at"]),
-        }
 
 
 class GetTasksAndQuestions(BaseModel):
@@ -123,7 +78,7 @@ def parse_time(
     return time
 
 
-def generate_tasks_from_audio(audio) -> tuple[list[dict], list[str]]:
+def generate_tasks_from_audio(audio) -> tuple[list[CarePlanTask], list[Question]]:
     encoded_string = base64.b64encode(audio.getvalue()).decode("utf-8")
     system_prompt = """
     You are a helpful assistant. Each user input will be an audio message containing
@@ -157,12 +112,10 @@ def generate_tasks_from_audio(audio) -> tuple[list[dict], list[str]]:
         completion.choices[0].message.tool_calls[0].function.arguments
     )
     tq = GetTasksAndQuestions(**arguments)
-    tasks = [task.deserialize() for task in tq.tasks]
-    questions = [
-        {"question": q, "answer": "", "updated_at": datetime.now()}
-        for q in tq.questions
-    ]
-    return (tasks, questions)
+    return (
+        [task.deserialize() for task in tq.tasks],
+        [Question(q, "") for q in tq.questions],
+    )
 
 
 def generate_answer_from_audio(audio, question: str) -> str:

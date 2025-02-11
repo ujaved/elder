@@ -1,8 +1,7 @@
 from supabase import create_client, Client
 from enum import Enum
-from datetime import date, datetime
-from chatbot import Task
-from dataclasses import dataclass
+from datetime import date, datetime, time
+from dataclasses import dataclass, field
 
 
 class Role(Enum):
@@ -17,9 +16,100 @@ class Caregiver_Status(Enum):
 
 @dataclass
 class CaregiverNote:
-    caregiver_id: str
-    content: str
+    note: str
     created_at: datetime
+
+    def serialize_to_db(self) -> dict:
+        return {
+            "note": self.note,
+            "created_at": self.created_at.isoformat(),
+        }
+
+    @staticmethod
+    def deserialize_from_db(note: dict):
+        return CaregiverNote(note["note"], datetime.fromisoformat(note["created_at"]))
+
+
+@dataclass
+class Caregiver:
+    id: str
+    status: Caregiver_Status
+    notes: list[CaregiverNote] = field(default_factory=list)
+
+    def serialize_to_db(self) -> dict:
+        return {
+            "question": self.question,
+            "answer": self.answer,
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+    @staticmethod
+    def deserialize_from_db(caregiver: dict):
+        return Caregiver(
+            caregiver["caregiver_id"],
+            Caregiver_Status(caregiver["status"]),
+            [CaregiverNote.deserialize_from_db(note) for note in caregiver["notes"]],
+        )
+
+
+@dataclass
+class Question:
+    question: str
+    answer: str
+    updated_at: datetime = datetime.now()
+
+    def serialize_to_db(self) -> dict:
+        return {
+            "question": self.question,
+            "answer": self.answer,
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+    @staticmethod
+    def deserialize_from_db(question: dict):
+        return Question(
+            question["question"],
+            question["answer"],
+            datetime.fromisoformat(question["updated_at"]),
+        )
+
+
+@dataclass
+class Task:
+    content: str
+    start_time: time | None = None
+    end_time: time | None = None
+    status: bool = False
+    updated_at: datetime = datetime.now()
+
+    def serialize_to_db(self, serialize_time: bool = True) -> dict:
+        return {
+            "content": self.content,
+            "status": self.status,
+            "updated_at": self.updated_at.isoformat(),
+            "start_time": (
+                self.start_time.isoformat()
+                if self.start_time and serialize_time
+                else self.start_time
+            ),
+            "end_time": (
+                self.end_time.isoformat()
+                if self.end_time and serialize_time
+                else self.end_time
+            ),
+        }
+
+    @staticmethod
+    def deserialize_from_db(task: dict):
+        return Task(
+            content=task["content"],
+            start_time=(
+                time.fromisoformat(task["start_time"]) if task["start_time"] else None
+            ),
+            end_time=time.fromisoformat(task["end_time"]) if task["end_time"] else None,
+            status=task["status"],
+            updated_at=datetime.fromisoformat(task["updated_at"]),
+        )
 
 
 @dataclass
@@ -28,8 +118,21 @@ class CarePlan:
     guardian_id: str
     date: date
     created_at: datetime
-    caregivers: list[str]
-    caregiver_notes: list[CaregiverNote]
+    caregivers: list[Caregiver] = field(default_factory=list)
+    questions: list[Question] = field(default_factory=list)
+    tasks: list[Task] = field(default_factory=list)
+
+    @staticmethod
+    def deserialize_from_db(cp: dict, caregivers: list[Caregiver]):
+        return CarePlan(
+            id=cp["id"],
+            guardian_id=cp["guardian_id"],
+            date=date.fromisoformat(cp["date"]),
+            created_at=datetime.fromisoformat(cp["created_at"]),
+            tasks=[Task.deserialize_from_db(task) for task in cp["tasks"]],
+            questions=[Question.deserialize_from_db(q) for q in cp["questions"]],
+            caregivers=caregivers,
+        )
 
 
 class DBClient:
@@ -52,7 +155,7 @@ class DBClient:
         else:
             return self.client.auth.get_user(jwt).user
 
-    def get_caregiver(self, email: str) -> dict | None:
+    def get_caregiver_user(self, email: str) -> dict | None:
         response = self.client.auth.admin.list_users()
         for user in response:
             if (
@@ -100,13 +203,14 @@ class DBClient:
             }
         self.client.auth.sign_in_with_otp({"email": email, "options": options})
 
-    def create_care_plan(self, guardian_id: str, date: date) -> dict:
-        return (
+    def create_care_plan(self, guardian_id: str, date: date) -> CarePlan:
+        cp = (
             self.client.table("care_plan")
             .insert({"guardian_id": guardian_id, "date": date.isoformat()})
             .execute()
             .data[0]
         )
+        return CarePlan.deserialize_from_db(cp, [])
 
     def delete_care_plan(self, care_plan_id: str):
         return self.client.table("care_plan").delete().eq("id", care_plan_id).execute()
@@ -116,33 +220,29 @@ class DBClient:
             {
                 "caregiver_id": caregiver_id,
                 "care_plan_id": care_plan_id,
-                "caregiver_status": Caregiver_Status.INVITED.value,
+                "status": Caregiver_Status.INVITED.value,
             }
         ).execute()
 
     def update_caregiver_status(
-        self, care_plan_id: str, caregiver_id: str, caregiver_status: Caregiver_Status
+        self, care_plan_id: str, caregiver_id: str, status: Caregiver_Status
     ):
-        self.client.table("caregiver").update(
-            {"caregiver_status": caregiver_status.value}
-        ).eq("care_plan_id", care_plan_id).eq("caregiver_id", caregiver_id).execute()
+        self.client.table("caregiver").update({"status": status.value}).eq(
+            "care_plan_id", care_plan_id
+        ).eq("caregiver_id", caregiver_id).execute()
 
     def update_care_plan(
         self,
         care_plan_id: str,
-        tasks: list[dict] | None = None,
-        questions: list[dict] | None = None,
-    ) -> dict:
+        tasks: list[Task] | None = None,
+        questions: list[Question] | None = None,
+    ) -> CarePlan:
         if tasks is not None:
             update = {"tasks": [Task.serialize_to_db(task) for task in tasks]}
             if questions:
-                update["questions"] = [
-                    Task.serialize_question_to_db(q) for q in questions
-                ]
+                update["questions"] = [Question.serialize_to_db(q) for q in questions]
         elif questions is not None:
-            update = {
-                "questions": [Task.serialize_question_to_db(q) for q in questions]
-            }
+            update = {"questions": [Question.serialize_to_db(q) for q in questions]}
             if tasks:
                 update["tasks"] = [Task.serialize_to_db(task) for task in tasks]
         updated = (
@@ -152,16 +252,7 @@ class DBClient:
             .execute()
             .data[0]
         )
-
-        if updated["tasks"]:
-            updated["tasks"] = [
-                Task.deserialize_from_db(task) for task in updated["tasks"]
-            ]
-        if updated["questions"]:
-            updated["questions"] = [
-                Task.deserialize_question_from_db(q) for q in updated["questions"]
-            ]
-        return updated
+        return CarePlan.deserialize_from_db(updated, self.get_caregivers(updated["id"]))
 
     def get_caregiver_ids_for_guardian(self, guardian_id: str) -> list[str]:
         data = (
@@ -187,9 +278,9 @@ class DBClient:
 
     def get_caregivers(
         self, care_plan_id: str, caregiver_id: str | None = None
-    ) -> list[dict]:
+    ) -> list[Caregiver]:
         if caregiver_id:
-            return (
+            cgs = (
                 self.client.table("caregiver")
                 .select("*")
                 .eq("care_plan_id", care_plan_id)
@@ -198,15 +289,16 @@ class DBClient:
                 .data
             )
         else:
-            return (
+            cgs = (
                 self.client.table("caregiver")
                 .select("*")
                 .eq("care_plan_id", care_plan_id)
                 .execute()
                 .data
             )
+        return [Caregiver.deserialize_from_db(cg) for cg in cgs]
 
-    def get_care_plans(self, guardian_id: str) -> list[dict]:
+    def get_care_plans(self, guardian_id: str) -> list[CarePlan]:
         cps = (
             self.client.table("care_plan")
             .select("*")
@@ -214,14 +306,12 @@ class DBClient:
             .execute()
             .data
         )
-        for cp in cps:
-            tasks = [Task.deserialize_from_db(task) for task in cp["tasks"]]
-            cp["tasks"] = tasks
-            questions = [Task.deserialize_question_from_db(q) for q in cp["questions"]]
-            cp["questions"] = questions
-        return cps
+        return [
+            CarePlan.deserialize_from_db(cp, self.get_caregivers(cp["id"]))
+            for cp in cps
+        ]
 
-    def get_care_plan(self, care_plan_id: str) -> dict | None:
+    def get_care_plan(self, care_plan_id: str) -> CarePlan | None:
         cp = (
             self.client.table("care_plan")
             .select("*")
@@ -233,8 +323,4 @@ class DBClient:
             cp = cp[0]
         else:
             return None
-        tasks = [Task.deserialize_from_db(task) for task in cp["tasks"]]
-        cp["tasks"] = tasks
-        questions = [Task.deserialize_question_from_db(q) for q in cp["questions"]]
-        cp["questions"] = questions
-        return cp
+        return CarePlan.deserialize_from_db(cp, self.get_caregivers(care_plan_id))
