@@ -1,5 +1,13 @@
 import streamlit as st
-from store import DBClient, Role, Caregiver_Status, CarePlan, Question, Task
+from store import (
+    DBClient,
+    Role,
+    Caregiver_Status,
+    CarePlan,
+    Question,
+    Task,
+    CaregiverNote,
+)
 from datetime import date, datetime, time
 from streamlit_calendar import calendar
 from gotrue.errors import AuthApiError
@@ -253,7 +261,6 @@ def refresh_care_plan(render: bool = False):
 def render_tasks(disabled_columns: list[str], container):
     cp: CarePlan = st.session_state.cur_care_plan
     container.subheader("Tasks")
-    # tasks = sorted(cp.tasks, key=lambda t: t.updated_at)
     container.data_editor(
         (
             [t.serialize_to_db(serialize_time=False) for t in cp.tasks]
@@ -275,10 +282,36 @@ def render_tasks(disabled_columns: list[str], container):
     )
 
 
+def caregiver_note_cb():
+    if not st.session_state.caregiver_note:
+        return
+    cp: CarePlan = st.session_state.cur_care_plan
+    idx = [cg.id for cg in cp.caregivers].index(st.session_state.user.id)
+    cp.caregivers[idx].notes.append(CaregiverNote(st.session_state.caregiver_note))
+    st.session_state.db_client.update_caregiver_notes(
+        cp.id, st.session_state.user.id, cp.caregivers[idx].notes
+    )
+
+
+def render_caregiver_notes(container, input: bool = False):
+    cp: CarePlan = st.session_state.cur_care_plan
+    if cp.caregiver_notes:
+        container.subheader("Caregiver Notes")
+    with container:
+        for note, name in cp.caregiver_notes:
+            with st.chat_message("user"):
+                st.write(f"{name} ({note.created_at.strftime("%H:%M")}): {note.note}")
+        if input:
+            st.chat_input(
+                placeholder="Add a note",
+                key="caregiver_note",
+                on_submit=caregiver_note_cb,
+            )
+
+
 def render_questions(container):
     cp: CarePlan = st.session_state.cur_care_plan
     container.subheader("Questions")
-    # questions = sorted(cp.questions, key=lambda t: t.updated_at)
     if cp.date < date.today():
         container.dataframe(
             (
@@ -371,10 +404,18 @@ def audio_input_cb():
     )
 
 
-def render_tasks_questions(tab, editable: bool = False):
+def render_content(tab):
     cp: CarePlan = st.session_state.cur_care_plan
-    with tab:
-        if editable:
+    role = Role(st.session_state.user.user_metadata["role"])
+    if cp.date < date.today():
+        with tab:
+            col1, col2 = st.columns(2)
+            render_tasks(["content", "start_time", "end_time", "status"], col1)
+            render_questions(st.container())
+            render_caregiver_notes(st.container())
+        return
+    if role == Role.GUARDIAN:
+        with tab:
             st.audio_input(
                 "You can always create a voice recording containing instructions and/or questions",
                 on_change=audio_input_cb,
@@ -382,16 +423,18 @@ def render_tasks_questions(tab, editable: bool = False):
             )
             col1, col2 = st.columns(2)
             render_tasks(disabled_columns=["status"], container=col1)
-            # render_task_calendar(col2)
             render_questions(st.container())
-        else:
-            disabled_columns = ["content", "start_time", "end_time"]
-            if cp.date < date.today():
-                disabled_columns.append("status")
-            col1, col2 = st.columns(2)
-            render_tasks(disabled_columns=disabled_columns, container=col1)
-            # render_task_calendar(col2)
-            render_questions(st.container())
+            render_caregiver_notes(st.container())
+        return
+
+    # caregiver view
+    with tab:
+        col1, col2 = st.columns(2)
+        render_tasks(
+            disabled_columns=["content", "start_time", "end_time"], container=col1
+        )
+        render_questions(st.container())
+        render_caregiver_notes(st.container(), input=True)
 
 
 def render_task_calendar(container):
@@ -433,10 +476,10 @@ def render_care_plan():
         careplan_tab, caregiver_tab = st.tabs(
             [f"Care plan for {cp.date}", "Caregivers"]
         )
-        render_tasks_questions(careplan_tab, editable=True)
+        render_content(careplan_tab)
         render_caregiver_status(caregiver_tab)
     else:
-        render_tasks_questions(st.tabs([f"Care plan for {cp.date}"])[0])
+        render_content(st.tabs([f"Care plan for {cp.date}"])[0])
 
 
 @st.dialog("Invite a new caregiver for this care plan")
@@ -515,7 +558,9 @@ def add_caregiver_cb(reinvite: bool = False):
     if reinvite:
         st.info(f"Reinvite sent to caregiver {name}")
     else:
-        st.session_state.db_client.create_caregiver_in_care_plan(caregiver.id, cp.id)
+        st.session_state.db_client.create_caregiver_in_care_plan(
+            caregiver.id, cp.id, name
+        )
         st.session_state["new_caregiver_invite_sent"] = True
 
 

@@ -17,7 +17,7 @@ class Caregiver_Status(Enum):
 @dataclass
 class CaregiverNote:
     note: str
-    created_at: datetime
+    created_at: time = datetime.now().time()
 
     def serialize_to_db(self) -> dict:
         return {
@@ -27,26 +27,21 @@ class CaregiverNote:
 
     @staticmethod
     def deserialize_from_db(note: dict):
-        return CaregiverNote(note["note"], datetime.fromisoformat(note["created_at"]))
+        return CaregiverNote(note["note"], time.fromisoformat(note["created_at"]))
 
 
 @dataclass
 class Caregiver:
     id: str
+    name: str
     status: Caregiver_Status
     notes: list[CaregiverNote] = field(default_factory=list)
-
-    def serialize_to_db(self) -> dict:
-        return {
-            "question": self.question,
-            "answer": self.answer,
-            "updated_at": self.updated_at.isoformat(),
-        }
 
     @staticmethod
     def deserialize_from_db(caregiver: dict):
         return Caregiver(
             caregiver["caregiver_id"],
+            caregiver["name"],
             Caregiver_Status(caregiver["status"]),
             [CaregiverNote.deserialize_from_db(note) for note in caregiver["notes"]],
         )
@@ -121,6 +116,13 @@ class CarePlan:
     caregivers: list[Caregiver] = field(default_factory=list)
     questions: list[Question] = field(default_factory=list)
     tasks: list[Task] = field(default_factory=list)
+
+    @property
+    def caregiver_notes(self) -> list[CaregiverNote]:
+        return sorted(
+            [[n, cg.name] for cg in self.caregivers for n in cg.notes],
+            key=lambda x: x[0].created_at,
+        )
 
     @staticmethod
     def deserialize_from_db(cp: dict, caregivers: list[Caregiver]):
@@ -215,10 +217,13 @@ class DBClient:
     def delete_care_plan(self, care_plan_id: str):
         return self.client.table("care_plan").delete().eq("id", care_plan_id).execute()
 
-    def create_caregiver_in_care_plan(self, caregiver_id: str, care_plan_id: str):
+    def create_caregiver_in_care_plan(
+        self, caregiver_id: str, care_plan_id: str, name: str
+    ):
         self.client.table("caregiver").insert(
             {
                 "caregiver_id": caregiver_id,
+                "name": name,
                 "care_plan_id": care_plan_id,
                 "status": Caregiver_Status.INVITED.value,
             }
@@ -230,6 +235,13 @@ class DBClient:
         self.client.table("caregiver").update({"status": status.value}).eq(
             "care_plan_id", care_plan_id
         ).eq("caregiver_id", caregiver_id).execute()
+
+    def update_caregiver_notes(
+        self, care_plan_id: str, caregiver_id: str, notes: list[CaregiverNote]
+    ):
+        self.client.table("caregiver").update(
+            {"notes": [n.serialize_to_db() for n in notes]}
+        ).eq("care_plan_id", care_plan_id).eq("caregiver_id", caregiver_id).execute()
 
     def update_care_plan(
         self,
