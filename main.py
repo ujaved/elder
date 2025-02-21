@@ -382,9 +382,10 @@ def audio_answer_cb(
             st.session_state[key], unanswered_questions[unanswered_idx]["question"]
         )
         unanswered_questions[unanswered_idx]["updated_at"] = datetime.now()
+
+    cp: CarePlan = st.session_state.cur_care_plan
     st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
-        st.session_state.cur_care_plan["id"],
-        questions=answered_questions + unanswered_questions,
+        cp.id, questions=answered_questions + unanswered_questions
     )
 
 
@@ -395,12 +396,11 @@ def audio_input_cb():
     with st.spinner("Transcribing audio"):
         tasks, questions = generate_tasks_from_audio(audio)
 
-    st.session_state.cur_care_plan["tasks"].extend(tasks)
-    st.session_state.cur_care_plan["questions"].extend(questions)
-    st.session_state["cur_care_plan"] = st.session_state.db_client.update_care_plan(
-        st.session_state.cur_care_plan["id"],
-        tasks=st.session_state.cur_care_plan["tasks"],
-        questions=st.session_state.cur_care_plan["questions"],
+    cp: CarePlan = st.session_state.cur_care_plan
+    cp.tasks.extend(tasks)
+    cp.questions.extend(questions)
+    st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
+        cp.id, tasks=cp.tasks, questions=cp.questions
     )
 
 
