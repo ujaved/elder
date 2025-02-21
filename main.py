@@ -219,15 +219,21 @@ def render_caregiver_status(container):
                 "name": name,
                 "invitation status": cg.status.value,
                 "reinvite?": (False if cg.status == Caregiver_Status.INVITED else ""),
+                "email": caregiver.email,
             }
         )
 
     if caregiver_df:
-        container.dataframe(
+        container.data_editor(
             caregiver_df,
             hide_index=True,
             use_container_width=True,
+            column_order=["name", "invitation status", "reinvite?"],
+            disabled=["name", "invitation status"],
             column_config={"reinvite?": st.column_config.CheckboxColumn()},
+            on_change=caregiver_reinvite_cb,
+            key="caregiver_reinvite",
+            args=[caregiver_df],
         )
     add_caregiver(
         container,
@@ -235,6 +241,14 @@ def render_caregiver_status(container):
             cg.id for cg in cp.caregivers if cg.status == Caregiver_Status.ACCEPTED
         ],
     )
+
+
+def caregiver_reinvite_cb(caregiver_df: list[dict]):
+    for r, d in st.session_state.caregiver_reinvite["edited_rows"].items():
+        if d.get("reinvite?"):
+            st.session_state.db_client.sign_in_with_otp(
+                caregiver_df[r]["email"], st.secrets["REDIRECT_URL"]
+            )
 
 
 def delete_plan_cb():
@@ -511,14 +525,12 @@ def caregiver_invites_themselves_cb():
     st.session_state["reinvite_sent"] = True
 
 
-def add_caregiver_cb(reinvite: bool = False):
+def add_caregiver_cb():
     cp: CarePlan = st.session_state.cur_care_plan
     cl = DBClient(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
     if st.session_state.get("caregiver_to_add"):
         # existing caregiver
         caregiver_id = st.session_state.caregivers[st.session_state.caregiver_to_add][0]
-
-    if st.session_state.get("caregiver_to_add") or reinvite:
         caregiver = cl.get_user(user_id=caregiver_id)
         caregiver.user_metadata["care_plan_id"] = cp.id
         cl.update_user_metadata(caregiver_id, caregiver.user_metadata)
@@ -555,13 +567,8 @@ def add_caregiver_cb(reinvite: bool = False):
         + " "
         + caregiver.user_metadata["last_name"]
     )
-    if reinvite:
-        st.info(f"Reinvite sent to caregiver {name}")
-    else:
-        st.session_state.db_client.create_caregiver_in_care_plan(
-            caregiver.id, cp.id, name
-        )
-        st.session_state["new_caregiver_invite_sent"] = True
+    st.session_state.db_client.create_caregiver_in_care_plan(caregiver.id, cp.id, name)
+    st.session_state["new_caregiver_invite_sent"] = True
 
 
 def add_caregiver(container, caregiver_ids_accepted: list[str] = []):
