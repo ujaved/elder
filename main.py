@@ -125,7 +125,7 @@ def question_list_changed():
 
     if st.session_state.question_list_changed["edited_rows"]:
         for r, edit in st.session_state.question_list_changed["edited_rows"].items():
-            if "question" in edit:
+            if "question" in edit and QUESTIONS_PLACEHOLDER not in edit["question"]:
                 cp.questions[r].question = edit["question"]
             if "answer" in edit:
                 cp.questions[r].answer = edit["answer"]
@@ -154,7 +154,7 @@ def task_list_changed():
     if st.session_state.task_list_changed["edited_rows"]:
         for r, edit in st.session_state.task_list_changed["edited_rows"].items():
             existing_duration = None
-            if "content" in edit:
+            if "content" in edit and TASKS_PLACEHOLDER not in edit["content"]:
                 cp.tasks[r].content = edit["content"]
             if "status" in edit:
                 cp.tasks[r].status = edit["status"]
@@ -246,9 +246,12 @@ def render_caregiver_status(container):
 def caregiver_reinvite_cb(caregiver_df: list[dict]):
     for r, d in st.session_state.caregiver_reinvite["edited_rows"].items():
         if d.get("reinvite?"):
-            st.session_state.db_client.sign_in_with_otp(
-                caregiver_df[r]["email"], st.secrets["REDIRECT_URL"]
-            )
+            try:
+                st.session_state.db_client.sign_in_with_otp(
+                    caregiver_df[r]["email"], st.secrets["REDIRECT_URL"]
+                )
+            except AuthApiError as e:
+                st.error(e)
 
 
 def delete_plan_cb():
@@ -534,9 +537,12 @@ def add_caregiver_cb():
         caregiver = cl.get_user(user_id=caregiver_id)
         caregiver.user_metadata["care_plan_id"] = cp.id
         cl.update_user_metadata(caregiver_id, caregiver.user_metadata)
-        st.session_state.db_client.sign_in_with_otp(
-            caregiver.email, st.secrets["REDIRECT_URL"]
-        )
+        try:
+            st.session_state.db_client.sign_in_with_otp(
+                caregiver.email, st.secrets["REDIRECT_URL"]
+            )
+        except AuthApiError as e:
+            st.error(e)
     else:
         # new caregiver, but their email might already exist in the user table
         caregiver = cl.get_caregiver_user(st.session_state.invited_caregiver_email)
