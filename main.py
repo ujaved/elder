@@ -125,8 +125,12 @@ def question_list_changed():
 
     if st.session_state.question_list_changed["edited_rows"]:
         for r, edit in st.session_state.question_list_changed["edited_rows"].items():
-            if "question" in edit and QUESTIONS_PLACEHOLDER not in edit["question"]:
-                cp.questions[r].question = edit["question"]
+            if "question" in edit:
+                # handle the case where the placeholder is edited
+                if not cp.questions:
+                    cp.questions.append(Question(question=edit["content"], answer=""))
+                else:
+                    cp.questions[r].question = edit["question"]
             if "answer" in edit:
                 cp.questions[r].answer = edit["answer"]
             cp.questions[r].updated_at = datetime.now()
@@ -154,8 +158,12 @@ def task_list_changed():
     if st.session_state.task_list_changed["edited_rows"]:
         for r, edit in st.session_state.task_list_changed["edited_rows"].items():
             existing_duration = None
-            if "content" in edit and TASKS_PLACEHOLDER not in edit["content"]:
-                cp.tasks[r].content = edit["content"]
+            if "content" in edit:
+                # handle the case where the placeholder is edited
+                if not cp.tasks:
+                    cp.tasks.append(Task(content=edit["content"]))
+                else:
+                    cp.tasks[r].content = edit["content"]
             if "status" in edit:
                 cp.tasks[r].status = edit["status"]
             if "start_time" in edit:
@@ -363,11 +371,10 @@ def render_questions(container):
         return
     # below is caregiver logic: answered questions are shown in data editor
     # and unanswered questions are shown with audio input
-    answered_questions = [q.serialize_to_db() for q in cp.questions if q.answer]
-    unanswered_questions = [q.serialize_to_db() for q in cp.questions if not q.answer]
+    answered_questions = [q for q in cp.questions if q.answer]
     if answered_questions:
         container.data_editor(
-            answered_questions,
+            [q.serialize_to_db() for q in cp.questions if q.answer],
             column_order=("question", "answer"),
             disabled=["question"],
             hide_index=True,
@@ -377,32 +384,29 @@ def render_questions(container):
             on_change=question_list_changed,
         )
     q_col, a_col = container.columns(2)
-    for i, q in enumerate(unanswered_questions):
-        q_col.text(q["question"])
+    for i, q in enumerate(cp.questions):
+        if q.answer:
+            continue
+        q_col.text(q.question)
         a_col.audio_input(
             "Please record your answer",
             key=f"answer_{i}",
             on_change=audio_answer_cb,
-            args=[answered_questions, unanswered_questions, i, container],
+            args=[i, container],
         )
 
 
-def audio_answer_cb(
-    answered_questions: list[dict],
-    unanswered_questions: list[dict],
-    unanswered_idx: int,
-    container,
-):
-    with container, st.spinner("Generating answer transcript"):
-        key = f"answer_{unanswered_idx}"
-        unanswered_questions[unanswered_idx]["answer"] = generate_answer_from_audio(
-            st.session_state[key], unanswered_questions[unanswered_idx]["question"]
-        )
-        unanswered_questions[unanswered_idx]["updated_at"] = datetime.now()
-
+def audio_answer_cb(idx: int, container):
     cp: CarePlan = st.session_state.cur_care_plan
+    with container, st.spinner("Generating answer transcript"):
+        key = f"answer_{idx}"
+        cp.questions[idx].answer = generate_answer_from_audio(
+            st.session_state[key], cp.questions[idx].question
+        )
+        cp.questions[idx].updated_at = datetime.now()
+
     st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
-        cp.id, questions=answered_questions + unanswered_questions
+        cp.id, questions=cp.questions
     )
 
 
@@ -578,7 +582,7 @@ def add_caregiver_cb():
 
 
 def add_caregiver(container, caregiver_ids_accepted: list[str] = []):
-    container.info("Add an existing caregiver or invite a new caregiver")
+    container.write("Add an existing caregiver or invite a new caregiver")
     caregiver_ids = st.session_state.db_client.get_caregiver_ids_for_guardian(
         st.session_state.user.id
     )
