@@ -2,6 +2,7 @@ from supabase import create_client, Client
 from enum import Enum
 from datetime import date, datetime, time
 from dataclasses import dataclass, field
+from utils import now_time
 
 
 class Role(Enum):
@@ -17,7 +18,7 @@ class Caregiver_Status(Enum):
 @dataclass
 class CaregiverNote:
     note: str
-    created_at: time = datetime.now().time()
+    created_at: time = field(default_factory=now_time)
 
     def serialize_to_db(self) -> dict:
         return {
@@ -51,7 +52,7 @@ class Caregiver:
 class Question:
     question: str
     answer: str
-    updated_at: datetime = datetime.now()
+    updated_at: datetime = field(default_factory=datetime.now)
 
     def serialize_to_db(self) -> dict:
         return {
@@ -75,7 +76,7 @@ class Task:
     start_time: time | None = None
     end_time: time | None = None
     status: bool = False
-    updated_at: datetime = datetime.now()
+    updated_at: datetime = field(default_factory=datetime.now)
 
     def serialize_to_db(self, serialize_time: bool = True) -> dict:
         return {
@@ -112,6 +113,7 @@ class CarePlan:
     id: str
     guardian_id: str
     date: date
+    patient_name: str
     created_at: datetime
     caregivers: list[Caregiver] = field(default_factory=list)
     questions: list[Question] = field(default_factory=list)
@@ -130,6 +132,7 @@ class CarePlan:
             id=cp["id"],
             guardian_id=cp["guardian_id"],
             date=date.fromisoformat(cp["date"]),
+            patient_name=cp["patient_name"],
             created_at=datetime.fromisoformat(cp["created_at"]),
             tasks=[Task.deserialize_from_db(task) for task in cp["tasks"]],
             questions=[Question.deserialize_from_db(q) for q in cp["questions"]],
@@ -205,10 +208,18 @@ class DBClient:
             }
         self.client.auth.sign_in_with_otp({"email": email, "options": options})
 
-    def create_care_plan(self, guardian_id: str, date: date) -> CarePlan:
+    def create_care_plan(
+        self, guardian_id: str, date: date, patient_name: str
+    ) -> CarePlan:
         cp = (
             self.client.table("care_plan")
-            .insert({"guardian_id": guardian_id, "date": date.isoformat()})
+            .insert(
+                {
+                    "guardian_id": guardian_id,
+                    "date": date.isoformat(),
+                    "patient_name": patient_name.lower().strip(),
+                }
+            )
             .execute()
             .data[0]
         )
@@ -310,29 +321,28 @@ class DBClient:
             )
         return [Caregiver.deserialize_from_db(cg) for cg in cgs]
 
-    def get_care_plans(self, guardian_id: str) -> list[CarePlan]:
-        cps = (
-            self.client.table("care_plan")
-            .select("*")
-            .eq("guardian_id", guardian_id)
-            .execute()
-            .data
-        )
+    def get_care_plans(
+        self,
+        care_plan_id: str | None = None,
+        guardian_id: str | None = None,
+        dt: date | None = None,
+        patient_name: str | None = None,
+    ) -> list[CarePlan]:
+        st = self.client.table("care_plan").select("*")
+        if care_plan_id:
+            st = st.eq("id", care_plan_id)
+        if guardian_id:
+            st = st.eq("guardian_id", guardian_id)
+        if dt:
+            st = st.eq("date", dt.isoformat())
+        if patient_name:
+            st = st.eq("patient_name", patient_name.lower().strip())
+        cps = st.execute().data
         return [
             CarePlan.deserialize_from_db(cp, self.get_caregivers(cp["id"]))
             for cp in cps
         ]
 
     def get_care_plan(self, care_plan_id: str) -> CarePlan | None:
-        cp = (
-            self.client.table("care_plan")
-            .select("*")
-            .eq("id", care_plan_id)
-            .execute()
-            .data
-        )
-        if cp:
-            cp = cp[0]
-        else:
-            return None
-        return CarePlan.deserialize_from_db(cp, self.get_caregivers(care_plan_id))
+        cp = self.get_care_plans(care_plan_id=care_plan_id)
+        return cp[0] if cp else None

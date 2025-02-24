@@ -1,10 +1,14 @@
-from datetime import time
+from datetime import time, datetime
 import os
 
 
 def add_time(t1: time, hour: int, min: int) -> time:
     m = t1.minute + min
     return time(hour=t1.hour + hour + int(m / 60), minute=m % 60)
+
+
+def now_time() -> time:
+    return datetime.now().time()
 
 
 def get_diff_time(t1: time, t2: time) -> tuple[int, int]:

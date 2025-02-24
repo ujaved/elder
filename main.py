@@ -128,7 +128,7 @@ def question_list_changed():
             if "question" in edit:
                 # handle the case where the placeholder is edited
                 if not cp.questions:
-                    cp.questions.append(Question(question=edit["content"], answer=""))
+                    cp.questions.append(Question(question=edit["question"], answer=""))
                 else:
                     cp.questions[r].question = edit["question"]
             if "answer" in edit:
@@ -210,7 +210,8 @@ def task_list_changed():
     st.session_state.cur_care_plan = cp
 
 
-def render_caregiver_status(container):
+@st.fragment(run_every="5s")
+def render_caregiver_status():
     cp: CarePlan = st.session_state.cur_care_plan
     caregiver_df = []
     for cg in cp.caregivers:
@@ -232,7 +233,7 @@ def render_caregiver_status(container):
         )
 
     if caregiver_df:
-        container.data_editor(
+        st.data_editor(
             caregiver_df,
             hide_index=True,
             use_container_width=True,
@@ -244,7 +245,6 @@ def render_caregiver_status(container):
             args=[caregiver_df],
         )
     add_caregiver(
-        container,
         caregiver_ids_accepted=[
             cg.id for cg in cp.caregivers if cg.status == Caregiver_Status.ACCEPTED
         ],
@@ -268,7 +268,6 @@ def delete_plan_cb():
         return
     st.session_state.db_client.delete_care_plan(cp.id)
     st.session_state.pop("cur_care_plan", None)
-    st.session_state.pop("date", None)
 
 
 @st.fragment(run_every="5s")
@@ -318,20 +317,22 @@ def caregiver_note_cb():
     )
 
 
-def render_caregiver_notes(container, input: bool = False):
-    cp: CarePlan = st.session_state.cur_care_plan
+@st.fragment(run_every="5s")
+def render_caregiver_notes(input: bool = False):
+    cp: CarePlan = st.session_state.get("cur_care_plan")
+    if not cp:
+        return
     if cp.caregiver_notes:
-        container.subheader("Caregiver Notes")
-    with container:
-        for note, name in cp.caregiver_notes:
-            with st.chat_message("user"):
-                st.write(f"{name} ({note.created_at.strftime("%H:%M")}): {note.note}")
-        if input:
-            st.chat_input(
-                placeholder="Add a note",
-                key="caregiver_note",
-                on_submit=caregiver_note_cb,
-            )
+        st.subheader("Caregiver Notes")
+    for note, name in cp.caregiver_notes:
+        with st.chat_message("user"):
+            st.write(f"{name} ({note.created_at.strftime("%H:%M")}): {note.note}")
+    if input:
+        st.chat_input(
+            placeholder="Add a note",
+            key="caregiver_note",
+            on_submit=caregiver_note_cb,
+        )
 
 
 def render_questions(container):
@@ -433,7 +434,7 @@ def render_content(tab):
             col1, col2 = st.columns(2)
             render_tasks(["content", "start_time", "end_time", "status"], col1)
             render_questions(st.container())
-            render_caregiver_notes(st.container())
+            render_caregiver_notes()
         return
     if role == Role.GUARDIAN:
         with tab:
@@ -445,7 +446,7 @@ def render_content(tab):
             col1, col2 = st.columns(2)
             render_tasks(disabled_columns=["status"], container=col1)
             render_questions(st.container())
-            render_caregiver_notes(st.container())
+            render_caregiver_notes()
         return
 
     # caregiver view
@@ -455,7 +456,7 @@ def render_content(tab):
             disabled_columns=["content", "start_time", "end_time"], container=col1
         )
         render_questions(st.container())
-        render_caregiver_notes(st.container(), input=True)
+        render_caregiver_notes(input=True)
 
 
 def render_task_calendar(container):
@@ -498,7 +499,8 @@ def render_care_plan():
             [f"Care plan for {cp.date}", "Caregivers"]
         )
         render_content(careplan_tab)
-        render_caregiver_status(caregiver_tab)
+        with caregiver_tab:
+            render_caregiver_status()
     else:
         render_content(st.tabs([f"Care plan for {cp.date}"])[0])
 
@@ -581,8 +583,8 @@ def add_caregiver_cb():
     st.session_state["new_caregiver_invite_sent"] = True
 
 
-def add_caregiver(container, caregiver_ids_accepted: list[str] = []):
-    container.write("Add an existing caregiver or invite a new caregiver")
+def add_caregiver(caregiver_ids_accepted: list[str] = []):
+    st.write("Add an existing caregiver or invite a new caregiver")
     caregiver_ids = st.session_state.db_client.get_caregiver_ids_for_guardian(
         st.session_state.user.id
     )
@@ -602,10 +604,10 @@ def add_caregiver(container, caregiver_ids_accepted: list[str] = []):
         for c in caregiver_users
     }
 
-    col1, col2 = container.columns(2)
+    col1, col2 = st.columns(2)
     with col1:
         if st.session_state.caregivers:
-            container.selectbox(
+            st.selectbox(
                 "Existing caregivers",
                 st.session_state.caregivers.keys(),
                 index=None,
@@ -613,39 +615,62 @@ def add_caregiver(container, caregiver_ids_accepted: list[str] = []):
                 on_change=add_caregiver_cb,
             )
         else:
-            container.error("No existing caregivers found")
+            st.error("No existing caregivers found")
     with col2:
-        if container.button("Invite a new caregiver", type="primary"):
+        if st.button("Invite a new caregiver", type="primary"):
             invite_new_caregiver()
 
 
+def create_care_plan_submit():
+    dt = st.session_state.create_care_plan_date
+    patient_name = st.session_state.create_care_plan_patient_name
+    if not dt or not patient_name:
+        st.error("Please provide all requested information")
+        return
+    existing = st.session_state.db_client.get_care_plans(
+        dt=dt, patient_name=patient_name
+    )
+    if existing:
+        st.error(f"A care plan already exists for {dt} and {patient_name}")
+        return
+    st.session_state["cur_care_plan"] = st.session_state.db_client.create_care_plan(
+        guardian_id=st.session_state.user.id, date=dt, patient_name=patient_name
+    )
+    st.session_state["just_created"] = True
+
+
 def create_care_plan():
-    cur_care_plan: CarePlan = st.session_state.get("cur_care_plan")
-    if cur_care_plan and cur_care_plan.date < date.today():
-        del st.session_state["cur_care_plan"]
-        cur_care_plan = None
-    if not cur_care_plan:
-        st.date_input("Date", value=None, min_value=date.today(), key="date")
-        if not st.session_state.date:
-            return
-        st.session_state["cur_care_plan"] = st.session_state.db_client.create_care_plan(
-            guardian_id=st.session_state.user.id, date=st.session_state.date
+    if st.session_state.get("just_created"):
+        st.switch_page(st.Page(care_plans, title="Care Plans", icon=":material/mic:"))
+        return
+
+    with st.form("create_care_plan_form", clear_on_submit=True):
+        st.date_input(
+            "Date", value=None, min_value=date.today(), key="create_care_plan_date"
         )
-    render_care_plan()
+        st.text_input("Patient Name", key="create_care_plan_patient_name")
+        st.form_submit_button("Submit", on_click=create_care_plan_submit)
 
 
 def care_plans():
+    st.session_state.pop("just_created", None)
+    cp: CarePlan = st.session_state.get("cur_care_plan")
     care_plans: list[CarePlan] = st.session_state.db_client.get_care_plans(
-        st.session_state.user.id
+        guardian_id=st.session_state.user.id
     )
-    care_plans = {cp.date: cp for cp in care_plans}
-    sorted_dates = sorted(list(care_plans.keys()), reverse=True)
+    care_plans = {(cp.date, cp.patient_name): cp for cp in care_plans}
+    sorted_dates = sorted({t[0] for t in care_plans.keys()}, reverse=True)
+    names = list(set([t[1] for t in care_plans.keys()]))
     if care_plans:
         dt = st.sidebar.selectbox(
-            "Existing care plans",
-            sorted_dates,
+            "Dates", sorted_dates, index=sorted_dates.index(cp.date) if cp else 0
         )
-        st.session_state["cur_care_plan"] = care_plans[dt]
+        patient_name = st.sidebar.selectbox(
+            "Patients",
+            names,
+            index=names.index(cp.patient_name) if cp else 0,
+        )
+        st.session_state["cur_care_plan"] = care_plans[(dt, patient_name)]
         render_care_plan()
     else:
         st.error("No existing care plans found")
