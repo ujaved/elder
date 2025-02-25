@@ -51,7 +51,7 @@ class Caregiver:
 @dataclass
 class Question:
     question: str
-    answer: str
+    answer: str = ""
     updated_at: datetime = field(default_factory=datetime.now)
 
     def serialize_to_db(self) -> dict:
@@ -209,7 +209,12 @@ class DBClient:
         self.client.auth.sign_in_with_otp({"email": email, "options": options})
 
     def create_care_plan(
-        self, guardian_id: str, date: date, patient_name: str
+        self,
+        guardian_id: str,
+        date: date,
+        patient_name: str,
+        tasks: list[Task] = [],
+        questions: list[Question] = [],
     ) -> CarePlan:
         cp = (
             self.client.table("care_plan")
@@ -218,6 +223,8 @@ class DBClient:
                     "guardian_id": guardian_id,
                     "date": date.isoformat(),
                     "patient_name": patient_name.lower().strip(),
+                    "tasks": [Task.serialize_to_db(task) for task in tasks],
+                    "questions": [Question.serialize_to_db(q) for q in questions],
                 }
             )
             .execute()

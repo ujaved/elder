@@ -128,7 +128,7 @@ def question_list_changed():
             if "question" in edit:
                 # handle the case where the placeholder is edited
                 if not cp.questions:
-                    cp.questions.append(Question(question=edit["question"], answer=""))
+                    cp.questions.append(Question(question=edit["question"]))
                 else:
                     cp.questions[r].question = edit["question"]
             if "answer" in edit:
@@ -138,7 +138,7 @@ def question_list_changed():
 
     if st.session_state.question_list_changed["added_rows"]:
         added = [
-            Question(r["question"], "")
+            Question(r["question"])
             for r in st.session_state.question_list_changed["added_rows"]
             if r.get("question")
         ]
@@ -625,7 +625,7 @@ def create_care_plan_submit():
     dt = st.session_state.create_care_plan_date
     patient_name = st.session_state.create_care_plan_patient_name
     if not dt or not patient_name:
-        st.error("Please provide all requested information")
+        st.error("Please provide the date and patient name")
         return
     existing = st.session_state.db_client.get_care_plans(
         dt=dt, patient_name=patient_name
@@ -633,34 +633,46 @@ def create_care_plan_submit():
     if existing:
         st.error(f"A care plan already exists for {dt} and {patient_name}")
         return
+
+    copy_dt = st.session_state.create_care_plan_copy_date
+    copy_patient = st.session_state.create_care_plan_copy_patient
+    if (copy_dt and not copy_patient) or (not copy_dt and copy_patient):
+        st.error(
+            "To copy a care plan's details please provide both the date and patient name"
+        )
+        return
+
+    tasks = []
+    questions = []
+    if copy_dt and copy_patient:
+        copy_plan: CarePlan = st.session_state.db_client.get_care_plans(
+            dt=copy_dt, patient_name=copy_patient
+        )[0]
+        tasks = [
+            Task(content=t.content, start_time=t.start_time, end_time=t.end_time)
+            for t in copy_plan.tasks
+        ]
+        questions = [Question(question=q.question) for q in copy_plan.questions]
     st.session_state["cur_care_plan"] = st.session_state.db_client.create_care_plan(
-        guardian_id=st.session_state.user.id, date=dt, patient_name=patient_name
+        guardian_id=st.session_state.user.id,
+        date=dt,
+        patient_name=patient_name,
+        tasks=tasks,
+        questions=questions,
     )
     st.session_state["just_created"] = True
 
 
-def create_care_plan():
-    if st.session_state.get("just_created"):
-        st.switch_page(st.Page(care_plans, title="Care Plans", icon=":material/mic:"))
-        return
-
-    with st.form("create_care_plan_form", clear_on_submit=True):
-        st.date_input(
-            "Date", value=None, min_value=date.today(), key="create_care_plan_date"
-        )
-        st.text_input("Patient Name", key="create_care_plan_patient_name")
-        st.form_submit_button("Submit", on_click=create_care_plan_submit)
-
-
 def care_plans():
     st.session_state.pop("just_created", None)
-    cp: CarePlan = st.session_state.get("cur_care_plan")
     care_plans: list[CarePlan] = st.session_state.db_client.get_care_plans(
         guardian_id=st.session_state.user.id
     )
     care_plans = {(cp.date, cp.patient_name): cp for cp in care_plans}
     sorted_dates = sorted({t[0] for t in care_plans.keys()}, reverse=True)
     names = list(set([t[1] for t in care_plans.keys()]))
+
+    cp: CarePlan = st.session_state.get("cur_care_plan")
     if care_plans:
         dt = st.sidebar.selectbox(
             "Dates", sorted_dates, index=sorted_dates.index(cp.date) if cp else 0
@@ -670,10 +682,50 @@ def care_plans():
             names,
             index=names.index(cp.patient_name) if cp else 0,
         )
-        st.session_state["cur_care_plan"] = care_plans[(dt, patient_name)]
+        cp = care_plans.get((dt, patient_name))
+        if not cp:
+            st.error(f"No existing care plan for date {dt} and patient {patient_name}")
+            return
+        st.session_state["cur_care_plan"] = cp
         render_care_plan()
     else:
         st.error("No existing care plans found")
+
+
+def create_care_plan():
+    if st.session_state.get("just_created"):
+        st.switch_page(care_plans_pg)
+        return
+
+    care_plans: list[CarePlan] = st.session_state.db_client.get_care_plans(
+        guardian_id=st.session_state.user.id
+    )
+    care_plans = {(cp.date, cp.patient_name): cp for cp in care_plans}
+    sorted_dates = sorted({t[0] for t in care_plans.keys()}, reverse=True)
+    names = list(set([t[1] for t in care_plans.keys()]))
+
+    with st.form("create_care_plan_form", clear_on_submit=True):
+        st.date_input(
+            "Date", value=None, min_value=date.today(), key="create_care_plan_date"
+        )
+        st.text_input("Patient Name", key="create_care_plan_patient_name")
+        st.write("Copy details from existing care plan")
+        col1, col2 = st.columns(2)
+        col1.selectbox(
+            "Dates", sorted_dates, index=None, key="create_care_plan_copy_date"
+        )
+        col2.selectbox(
+            "Patients", names, index=None, key="create_care_plan_copy_patient"
+        )
+        st.form_submit_button("Submit", on_click=create_care_plan_submit)
+
+
+create_care_plan_pg = st.Page(
+    create_care_plan, title="Create Care Plan", icon=":material/add_notes:"
+)
+care_plans_pg = st.Page(
+    care_plans, title="Care Plans", icon=":material/mic:", default=True
+)
 
 
 def main():
@@ -687,22 +739,7 @@ def main():
         role = Role(st.session_state.user.user_metadata["role"])
         if role == Role.GUARDIAN:
             refresh_care_plan()
-            pg = st.navigation(
-                [
-                    st.Page(
-                        create_care_plan,
-                        title="Create Care Plan",
-                        icon=":material/add_notes:",
-                    ),
-                    st.Page(
-                        care_plans,
-                        title="Care Plans",
-                        icon=":material/mic:",
-                        default=True,
-                    ),
-                ]
-            )
-            pg.run()
+            st.navigation([create_care_plan_pg, care_plans_pg]).run()
         else:
             refresh_care_plan(render=True)
     elif "reset_password" in st.query_params:
