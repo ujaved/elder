@@ -328,11 +328,12 @@ def render_caregiver_notes(input: bool = False):
         with st.chat_message("user"):
             st.write(f"{name} ({note.created_at.strftime("%H:%M")}): {note.note}")
     if input:
-        st.chat_input(
-            placeholder="Add a note",
-            key="caregiver_note",
-            on_submit=caregiver_note_cb,
-        )
+        with st.empty():
+            st.chat_input(
+                placeholder="Add a note",
+                key="caregiver_note",
+                on_submit=caregiver_note_cb,
+            )
 
 
 def render_questions(container):
