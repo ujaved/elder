@@ -275,21 +275,17 @@ def delete_plan_cb():
 
 
 @st.fragment(run_every="5s")
-def refresh_care_plan(render: bool = False):
+def refresh_care_plan():
     cp: CarePlan = st.session_state.get("cur_care_plan")
     if not cp:
-        if render:
-            st.error("No care plan found")
         return
     st.session_state.cur_care_plan = st.session_state.db_client.get_care_plan(cp.id)
-    if render:
-        render_care_plan()
 
 
-def render_tasks(disabled_columns: list[str], container):
+def render_tasks(disabled_columns: list[str]):
     cp: CarePlan = st.session_state.cur_care_plan
-    container.subheader("Tasks")
-    container.data_editor(
+    st.subheader("Tasks")
+    st.data_editor(
         (
             [t.serialize_to_db(serialize_time=False) for t in cp.tasks]
             if cp.tasks
@@ -321,7 +317,6 @@ def caregiver_note_cb():
     )
 
 
-@st.fragment(run_every="5s")
 def render_caregiver_notes(input: bool = False):
     cp: CarePlan = st.session_state.get("cur_care_plan")
     if not cp:
@@ -339,11 +334,11 @@ def render_caregiver_notes(input: bool = False):
         )
 
 
-def render_questions(container):
+def render_questions():
     cp: CarePlan = st.session_state.cur_care_plan
-    container.subheader("Questions")
+    st.subheader("Questions")
     if cp.date < date.today():
-        container.dataframe(
+        st.dataframe(
             (
                 [q.serialize_to_db() for q in cp.questions]
                 if cp.questions
@@ -359,7 +354,7 @@ def render_questions(container):
         return
     role = Role(st.session_state.user.user_metadata["role"])
     if role == Role.GUARDIAN:
-        container.data_editor(
+        st.data_editor(
             (
                 [q.serialize_to_db() for q in cp.questions]
                 if cp.questions
@@ -378,7 +373,7 @@ def render_questions(container):
     # and unanswered questions are shown with audio input
     answered_questions = [q for q in cp.questions if q.answer]
     if answered_questions:
-        container.data_editor(
+        st.data_editor(
             [q.serialize_to_db() for q in cp.questions if q.answer],
             column_order=("question", "answer"),
             disabled=["question"],
@@ -388,7 +383,7 @@ def render_questions(container):
             key="question_list_changed",
             on_change=question_list_changed,
         )
-    q_col, a_col = container.columns(2)
+    q_col, a_col = st.columns(2)
     for i, q in enumerate(cp.questions):
         if q.answer:
             continue
@@ -397,13 +392,13 @@ def render_questions(container):
             "Please record your answer",
             key=f"answer_{i}",
             on_change=audio_answer_cb,
-            args=[i, container],
+            args=[i],
         )
 
 
-def audio_answer_cb(idx: int, container):
+def audio_answer_cb(idx: int):
     cp: CarePlan = st.session_state.cur_care_plan
-    with container, st.spinner("Generating answer transcript"):
+    with st.spinner("Generating answer transcript"):
         key = f"answer_{idx}"
         cp.questions[idx].answer = generate_answer_from_audio(
             st.session_state[key], cp.questions[idx].question
@@ -430,37 +425,30 @@ def audio_input_cb():
     )
 
 
-def render_content(tab):
+@st.fragment(run_every="5s")
+def render_content():
     cp: CarePlan = st.session_state.cur_care_plan
     role = Role(st.session_state.user.user_metadata["role"])
     if cp.date < date.today():
-        with tab:
-            col1, col2 = st.columns(2)
-            render_tasks(["content", "start_time", "end_time", "status"], col1)
-            render_questions(st.container())
-            render_caregiver_notes()
+        render_tasks(["content", "start_time", "end_time", "status"])
+        render_questions()
+        render_caregiver_notes()
         return
     if role == Role.GUARDIAN:
-        with tab:
-            st.audio_input(
-                "You can always create a voice recording containing instructions and/or questions",
-                on_change=audio_input_cb,
-                key="audio",
-            )
-            col1, col2 = st.columns(2)
-            render_tasks(disabled_columns=["status"], container=col1)
-            render_questions(st.container())
-            render_caregiver_notes()
+        st.audio_input(
+            "You can always create a voice recording containing instructions and/or questions",
+            on_change=audio_input_cb,
+            key="audio",
+        )
+        render_tasks(disabled_columns=["status"])
+        render_questions()
+        render_caregiver_notes()
         return
 
     # caregiver view
-    with tab:
-        col1, col2 = st.columns(2)
-        render_tasks(
-            disabled_columns=["content", "start_time", "end_time"], container=col1
-        )
-        render_questions(st.container())
-        render_caregiver_notes(input=True)
+    render_tasks(disabled_columns=["content", "start_time", "end_time"])
+    render_questions()
+    render_caregiver_notes(input=True)
 
 
 def render_task_calendar(container):
@@ -486,7 +474,10 @@ def render_task_calendar(container):
 
 
 def render_care_plan():
-    cp: CarePlan = st.session_state.cur_care_plan
+    cp: CarePlan = st.session_state.get("cur_care_plan")
+    if not cp:
+        st.error("no care plan found")
+        return
     role = Role(st.session_state.user.user_metadata["role"])
     if role == Role.GUARDIAN and cp.date >= date.today():
         with stylable_container(
@@ -502,11 +493,12 @@ def render_care_plan():
         careplan_tab, caregiver_tab = st.tabs(
             [f"Care plan for {cp.date}", "Caregivers"]
         )
-        render_content(careplan_tab)
+        with careplan_tab:
+            render_content()
         with caregiver_tab:
             render_caregiver_status()
     else:
-        render_content(st.tabs([f"Care plan for {cp.date}"])[0])
+        render_content()
 
 
 @st.dialog("Invite a new caregiver for this care plan")
@@ -740,12 +732,12 @@ def main():
     init_connection()
 
     if st.session_state.get("user"):
+        refresh_care_plan()
         role = Role(st.session_state.user.user_metadata["role"])
         if role == Role.GUARDIAN:
-            refresh_care_plan()
             st.navigation([create_care_plan_pg, care_plans_pg]).run()
         else:
-            refresh_care_plan(render=True)
+            render_care_plan()
     elif "reset_password" in st.query_params:
         fragment = get_fragment()
         if fragment:
