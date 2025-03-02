@@ -153,7 +153,9 @@ def question_list_changed():
 def task_list_changed():
     cp: CarePlan = st.session_state.cur_care_plan
     if st.session_state.task_list_changed["deleted_rows"]:
-        for r in st.session_state.task_list_changed["deleted_rows"]:
+        for r in sorted(
+            st.session_state.task_list_changed["deleted_rows"], reverse=True
+        ):
             del cp.tasks[r]
         cp = st.session_state.db_client.update_care_plan(cp.id, tasks=cp.tasks)
 
