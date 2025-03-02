@@ -119,7 +119,9 @@ def reset_password_submit(user_id: str):
 def question_list_changed():
     cp: CarePlan = st.session_state.cur_care_plan
     if st.session_state.question_list_changed["deleted_rows"]:
-        for r in st.session_state.question_list_changed["deleted_rows"]:
+        for r in sorted(
+            st.session_state.question_list_changed["deleted_rows"], reverse=True
+        ):
             del cp.questions[r]
         cp = st.session_state.db_client.update_care_plan(cp.id, questions=cp.questions)
 
@@ -328,12 +330,11 @@ def render_caregiver_notes(input: bool = False):
         with st.chat_message("user"):
             st.write(f"{name} ({note.created_at.strftime("%H:%M")}): {note.note}")
     if input:
-        with st.empty():
-            st.chat_input(
-                placeholder="Add a note",
-                key="caregiver_note",
-                on_submit=caregiver_note_cb,
-            )
+        st.chat_input(
+            placeholder="Add a note",
+            key="caregiver_note",
+            on_submit=caregiver_note_cb,
+        )
 
 
 def render_questions(container):
