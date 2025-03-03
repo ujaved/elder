@@ -118,29 +118,35 @@ def generate_tasks_from_audio(audio) -> tuple[list[CarePlanTask], list[Question]
     )
 
 
-def generate_answer_from_audio(audio, question: str) -> str:
+def transcribe_audio(audio, question: str | None = None) -> str:
+    system_prompt = "You are a helpful assistant. Transcribe this audio"
+    if question:
+        system_prompt += ", which is an answer to a question, also given as text."
+
     encoded_string = base64.b64encode(audio.getvalue()).decode("utf-8")
+    content = [
+        {
+            "type": "input_audio",
+            "input_audio": {"data": encoded_string, "format": "wav"},
+        }
+    ]
+    if question:
+        content.append(
+            {
+                "type": "text",
+                "text": f"The attached audio, to be transcribed, is an answer to this question {question}",
+            }
+        )
+
     completion = OpenAI().chat.completions.create(
         model="gpt-4o-audio-preview",
         modalities=["text"],
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful assistant. Transcribe this audio, which is an answer to a question, also given as text.",
+                "content": system_prompt,
             },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"The attached audio, to be transcribed, is an answer to this question {question}",
-                    },
-                    {
-                        "type": "input_audio",
-                        "input_audio": {"data": encoded_string, "format": "wav"},
-                    },
-                ],
-            },
+            {"role": "user", "content": content},
         ],
     )
     return completion.choices[0].message.content

@@ -14,7 +14,7 @@ from gotrue.errors import AuthApiError
 from streamlit_url_fragment import get_fragment
 import jwt
 from streamlit_extras.stylable_container import stylable_container
-from chatbot import generate_tasks_from_audio, generate_answer_from_audio
+from chatbot import generate_tasks_from_audio, transcribe_audio
 from utils import add_time, get_diff_time
 
 TASKS_PLACEHOLDER = "No tasks yet!"
@@ -307,11 +307,28 @@ def render_tasks(disabled_columns: list[str]):
 
 
 def caregiver_note_cb():
-    if not st.session_state.caregiver_note:
+    cp: CarePlan = st.session_state.cur_care_plan
+    idx = [cg.id for cg in cp.caregivers].index(st.session_state.user.id)
+    note = st.session_state.get("caregiver_note")
+    if not note:
+        return
+    cp.caregivers[idx].notes.append(CaregiverNote(note))
+    st.session_state.db_client.update_caregiver_notes(
+        cp.id, st.session_state.user.id, cp.caregivers[idx].notes
+    )
+
+
+def caregiver_audio_note_cb():
+    audio_note = st.session_state.get("caregiver_audio_note")
+    if (
+        not audio_note
+        or type(audio_note) != st.runtime.uploaded_file_manager.UploadedFile
+    ):
         return
     cp: CarePlan = st.session_state.cur_care_plan
     idx = [cg.id for cg in cp.caregivers].index(st.session_state.user.id)
-    cp.caregivers[idx].notes.append(CaregiverNote(st.session_state.caregiver_note))
+    with st.spinner("Transcribing audio note"):
+        cp.caregivers[idx].notes.append(CaregiverNote(transcribe_audio(audio_note)))
     st.session_state.db_client.update_caregiver_notes(
         cp.id, st.session_state.user.id, cp.caregivers[idx].notes
     )
@@ -327,10 +344,16 @@ def render_caregiver_notes(input: bool = False):
         with st.chat_message("user"):
             st.write(f"{name} ({note.created_at.strftime("%H:%M")}): {note.note}")
     if input:
-        st.chat_input(
-            placeholder="Add a note",
+        col1, col2 = st.columns(2)
+        col1.chat_input(
+            placeholder="Write a note",
             key="caregiver_note",
             on_submit=caregiver_note_cb,
+        )
+        col2.audio_input(
+            "Record a note",
+            key="caregiver_audio_note",
+            on_change=caregiver_audio_note_cb,
         )
 
 
@@ -398,11 +421,11 @@ def render_questions():
 
 def audio_answer_cb(idx: int):
     cp: CarePlan = st.session_state.cur_care_plan
+    audio = st.session_state[f"answer_{idx}"]
+    if audio is None or type(audio) != st.runtime.uploaded_file_manager.UploadedFile:
+        return
     with st.spinner("Generating answer transcript"):
-        key = f"answer_{idx}"
-        cp.questions[idx].answer = generate_answer_from_audio(
-            st.session_state[key], cp.questions[idx].question
-        )
+        cp.questions[idx].answer = transcribe_audio(audio, cp.questions[idx].question)
         cp.questions[idx].updated_at = datetime.now()
 
     st.session_state.cur_care_plan = st.session_state.db_client.update_care_plan(
