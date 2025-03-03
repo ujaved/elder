@@ -412,7 +412,7 @@ def audio_answer_cb(idx: int):
 
 def audio_input_cb():
     audio = st.session_state.get("audio")
-    if audio is None:
+    if audio is None or type(audio) != st.runtime.uploaded_file_manager.UploadedFile:
         return
     with st.spinner("Transcribing audio"):
         tasks, questions = generate_tasks_from_audio(audio)
@@ -427,13 +427,15 @@ def audio_input_cb():
 
 @st.fragment(run_every="5s")
 def render_content():
-    cp: CarePlan = st.session_state.cur_care_plan
-    role = Role(st.session_state.user.user_metadata["role"])
+    cp: CarePlan = st.session_state.get("cur_care_plan")
+    if not cp:
+        return
     if cp.date < date.today():
         render_tasks(["content", "start_time", "end_time", "status"])
         render_questions()
         render_caregiver_notes()
         return
+    role = Role(st.session_state.user.user_metadata["role"])
     if role == Role.GUARDIAN:
         st.audio_input(
             "You can always create a voice recording containing instructions and/or questions",
@@ -524,9 +526,12 @@ def caregiver_invites_themselves():
 
 
 def caregiver_invites_themselves_cb():
-    st.session_state.db_client.sign_in_with_otp(
-        st.session_state.invited_caregiver_email, st.secrets["REDIRECT_URL"]
-    )
+    try:
+        st.session_state.db_client.sign_in_with_otp(
+            st.session_state.invited_caregiver_email, st.secrets["REDIRECT_URL"]
+        )
+    except AuthApiError as e:
+        st.error(e)
     st.session_state["reinvite_sent"] = True
 
 
