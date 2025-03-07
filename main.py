@@ -669,9 +669,14 @@ def create_care_plan_submit():
     tasks = []
     questions = []
     if copy_dt and copy_patient:
-        copy_plan: CarePlan = st.session_state.db_client.get_care_plans(
+        cps = st.session_state.db_client.get_care_plans(
             dt=copy_dt, patient_name=copy_patient
-        )[0]
+        )
+        if not cps:
+            st.error(f"No existing care plan found for {dt} and {patient_name}")
+            return
+
+        copy_plan: CarePlan = cps[0]
         tasks = [
             Task(content=t.content, start_time=t.start_time, end_time=t.end_time)
             for t in copy_plan.tasks
