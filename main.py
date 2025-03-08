@@ -531,10 +531,7 @@ def invite_new_caregiver():
     st.text_input("Email", key="invited_caregiver_email")
     st.text_input("First name", key="invited_caregiver_first_name")
     st.text_input("Last name", key="invited_caregiver_last_name")
-    st.button("Submit", on_click=add_caregiver_cb)
-    if st.session_state.get("new_caregiver_accepted"):
-        del st.session_state["new_caregiver_accepted"]
-        st.error("This caregiver has already accepted an invite")
+    st.button("Submit", on_click=add_caregiver_cb, key="invite_new_caregiver_button")
     if st.session_state.get("new_caregiver_invite_sent"):
         del st.session_state["new_caregiver_invite_sent"]
         st.rerun()
@@ -563,8 +560,9 @@ def add_caregiver_cb():
     cl = DBClient(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
     if st.session_state.get("caregiver_to_add"):
         # existing caregiver
-        caregiver_id = st.session_state.caregivers[st.session_state.caregiver_to_add][0]
+        caregiver_id = st.session_state.caregivers[st.session_state.caregiver_to_add]
         caregiver = cl.get_user(user_id=caregiver_id)
+        caregiver_name = f"{caregiver.user_metadata["first_name"]} {caregiver.user_metadata["last_name"]}"
         caregiver.user_metadata["care_plan_id"] = cp.id
         cl.update_user_metadata(caregiver_id, caregiver.user_metadata)
         try:
@@ -573,59 +571,57 @@ def add_caregiver_cb():
             )
         except AuthApiError as e:
             st.error(e)
-    else:
-        # new caregiver, but their email might already exist in the user table
-        caregiver = cl.get_caregiver_user(st.session_state.invited_caregiver_email)
-        if caregiver:
-            # if this caregiver has already accepted return error message and noop
-            caregivers = st.session_state.db_client.get_caregivers(cp.id, caregiver.id)
-            if (
-                caregivers
-                and Caregiver_Status(caregivers[0]["caregiver_status"])
-                == Caregiver_Status.ACCEPTED
-            ):
-                st.session_state["new_caregiver_accepted"] = True
-                return
-            caregiver.user_metadata["care_plan_id"] = cp.id
-            cl.update_user_metadata(caregiver.id, caregiver.user_metadata)
-
-        st.session_state.db_client.sign_in_with_otp(
-            st.session_state.invited_caregiver_email,
-            st.secrets["REDIRECT_URL"],
-            cp.id,
-            st.session_state.invited_caregiver_first_name,
-            st.session_state.invited_caregiver_last_name,
+            return
+        st.session_state.db_client.create_caregiver_in_care_plan(
+            caregiver_id, cp.id, caregiver_name
         )
-        caregiver = cl.get_caregiver_user(st.session_state.invited_caregiver_email)
+    elif st.session_state.get("invite_new_caregiver_button"):
+        # new caregiver, but the user might exist already
+        try:
+            st.session_state.db_client.sign_in_with_otp(
+                st.session_state.invited_caregiver_email,
+                st.secrets["REDIRECT_URL"],
+                cp.id,
+                st.session_state.invited_caregiver_first_name,
+                st.session_state.invited_caregiver_last_name,
+            )
+        except AuthApiError as e:
+            st.error(e)
+            return
+        st.session_state["new_caregiver_invite_sent"] = True
 
-    name = (
-        caregiver.user_metadata["first_name"]
-        + " "
-        + caregiver.user_metadata["last_name"]
-    )
-    st.session_state.db_client.create_caregiver_in_care_plan(caregiver.id, cp.id, name)
-    st.session_state["new_caregiver_invite_sent"] = True
+        cg = st.session_state.db_client.get_caregivers_for_guardian(
+            guardian_id=cp.guardian_id,
+            caregiver_email=st.session_state.invited_caregiver_email,
+        )
+        if cg:
+            caregiver_id = cg[0]["caregiver_id"]
+            caregiver_name = cg[0]["caregiver_name"]
+        else:
+            caregiver = cl.get_caregiver_user(st.session_state.invited_caregiver_email)
+            st.session_state.db_client.create_guardian_caregiver(
+                cp.guardian_id,
+                caregiver.id,
+                caregiver.email,
+                f"{caregiver.user_metadata["first_name"]} {caregiver.user_metadata["last_name"]}",
+            )
+            caregiver_id = caregiver.id
+            caregiver_name = f"{caregiver.user_metadata["first_name"]} {caregiver.user_metadata["last_name"]}"
+
+        st.session_state.db_client.create_caregiver_in_care_plan(
+            caregiver_id, cp.id, caregiver_name
+        )
 
 
 def add_caregiver(caregiver_ids_accepted: list[str] = []):
     st.write("Add an existing caregiver or invite a new caregiver")
-    caregiver_ids = st.session_state.db_client.get_caregiver_ids_for_guardian(
+    caregivers = st.session_state.db_client.get_caregivers_for_guardian(
         st.session_state.user.id
     )
-    cl = DBClient(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-    caregiver_users = []
-    for c in caregiver_ids:
-        if c in caregiver_ids_accepted:
-            continue
-        u = cl.get_user(user_id=c)
-        if u:
-            caregiver_users.append(u)
     st.session_state["caregivers"] = {
-        f"{c.user_metadata["first_name"]} {c.user_metadata["last_name"]}": (
-            c.id,
-            c.email,
-        )
-        for c in caregiver_users
+        c["caregiver_name"]: c["caregiver_id"]
+        for c in caregivers
+        if c["caregiver_id"] not in caregiver_ids_accepted
     }
 
     col1, col2 = st.columns(2)

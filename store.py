@@ -238,26 +238,51 @@ class DBClient:
     def create_caregiver_in_care_plan(
         self, caregiver_id: str, care_plan_id: str, name: str
     ):
-        self.client.table("caregiver").insert(
+        data = (
+            self.client.table("caregiver_notes")
+            .select("*")
+            .eq("care_plan_id", care_plan_id)
+            .eq("caregiver_id", caregiver_id)
+            .execute()
+            .data
+        )
+        if not data:
+            self.client.table("caregiver_notes").insert(
+                {
+                    "caregiver_id": caregiver_id,
+                    "care_plan_id": care_plan_id,
+                    "name": name,
+                    "status": Caregiver_Status.INVITED.value,
+                }
+            ).execute()
+
+    def create_guardian_caregiver(
+        self,
+        guardian_id: str,
+        caregiver_id: str,
+        caregiver_email: str,
+        caregiver_name: str,
+    ):
+        self.client.table("guardian_caregiver").insert(
             {
+                "guardian_id": guardian_id,
                 "caregiver_id": caregiver_id,
-                "name": name,
-                "care_plan_id": care_plan_id,
-                "status": Caregiver_Status.INVITED.value,
+                "caregiver_email": caregiver_email,
+                "caregiver_name": caregiver_name,
             }
         ).execute()
 
     def update_caregiver_status(
         self, care_plan_id: str, caregiver_id: str, status: Caregiver_Status
     ):
-        self.client.table("caregiver").update({"status": status.value}).eq(
+        self.client.table("caregiver_notes").update({"status": status.value}).eq(
             "care_plan_id", care_plan_id
         ).eq("caregiver_id", caregiver_id).execute()
 
     def update_caregiver_notes(
         self, care_plan_id: str, caregiver_id: str, notes: list[CaregiverNote]
     ):
-        self.client.table("caregiver").update(
+        self.client.table("caregiver_notes").update(
             {"notes": [n.serialize_to_db() for n in notes]}
         ).eq("care_plan_id", care_plan_id).eq("caregiver_id", caregiver_id).execute()
 
@@ -284,17 +309,31 @@ class DBClient:
         )
         return CarePlan.deserialize_from_db(updated, self.get_caregivers(updated["id"]))
 
-    def get_caregiver_ids_for_guardian(self, guardian_id: str) -> list[str]:
+    def get_caregivers_for_guardian(
+        self,
+        guardian_id: str,
+        caregiver_id: str | None = None,
+        caregiver_email: str | None = None,
+    ) -> list[dict]:
+        q = (
+            self.client.table("guardian_caregiver")
+            .select("*")
+            .eq("guardian_id", guardian_id)
+        )
+        if caregiver_id:
+            q = q.eq("caregiver_id", caregiver_id)
+        elif caregiver_email:
+            q = q.eq("caregiver_email", caregiver_email)
+        return q.execute().data
+        """
         data = (
-            self.client.table("caregiver")
+            self.client.table("caregiver_notes")
             .select("caregiver_id, care_plan!inner(id)")
             .eq("care_plan.guardian_id", guardian_id)
             .execute()
             .data
         )
-        return [d["caregiver_id"] for d in data]
 
-        """
         caregiver_ids = (
             self.client.table("care_plan")
             .select("caregiver_id")
@@ -311,7 +350,7 @@ class DBClient:
     ) -> list[Caregiver]:
         if caregiver_id:
             cgs = (
-                self.client.table("caregiver")
+                self.client.table("caregiver_notes")
                 .select("*")
                 .eq("care_plan_id", care_plan_id)
                 .eq("caregiver_id", caregiver_id)
@@ -320,7 +359,7 @@ class DBClient:
             )
         else:
             cgs = (
-                self.client.table("caregiver")
+                self.client.table("caregiver_notes")
                 .select("*")
                 .eq("care_plan_id", care_plan_id)
                 .execute()
