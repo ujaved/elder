@@ -119,7 +119,7 @@ def generate_tasks_from_audio(audio) -> tuple[list[CarePlanTask], list[Question]
 
 
 def transcribe_audio(audio, question: str | None = None) -> str:
-    system_prompt = "You are a helpful assistant. Transcribe this audio"
+    system_prompt = "You are a helpful assistant. Transcribe this audio word for word"
     if question:
         system_prompt += ", which is an answer to a question, also given as text."
 

@@ -516,7 +516,7 @@ def render_care_plan():
             st.button("Delete plan", type="primary", on_click=delete_plan_cb)
 
         careplan_tab, caregiver_tab = st.tabs(
-            [f"Care plan for {cp.date}", "Caregivers"]
+            [f"Care plan for {cp.date} and {cp.patient_name}", "Caregivers"]
         )
         with careplan_tab:
             render_content()
